@@ -68,7 +68,11 @@
 #else // FORCE_UNSAFE_ASSERT
 #include <cassert>
 #define ASSERT assert
+#ifdef NDEBUG
 #define ASSERT_M(expr, message) assert((expr) && #message)
+#else
+#define ASSERT_M(expr, message) ((void)((!!(expr)) || (fprintf(stderr, "ASSERT_M(" #expr ", " #message "): `%s`\n", message))), assert(expr))
+#endif
 #define ASSERT_SRC_LOC ASSERT
 #define ASSERT_M_SRC_LOC ASSERT_M
 #endif // FORCE_UNSAFE_ASSERT

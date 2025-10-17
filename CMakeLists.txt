@@ -533,6 +533,20 @@ else()
     target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/parser/include")
 endif()
 
+
+option(TL_PERFECT_HASH_TRANSLATION "use a compile time hash to maybe speed up translation lookup, hash collisions will cause compile time errors" OFF)
+
+if(TL_PERFECT_HASH_TRANSLATION)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE TL_PERFECT_HASH_TRANSLATION)
+endif()
+
+
+option(TL_COMPILE_TIME_ASSERTS "check that all _T(\"\") strings are included in translations/english_ref.inl during compile time" OFF)
+
+if(TL_COMPILE_TIME_ASSERTS)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE TL_COMPILE_TIME_ASSERTS)
+endif()
+
 # this gets rid of the assert popup, so instead it just uses plain assert()
 #option(DISABLE_CUSTOM_ASSERT "by default a dialog window opens, this will use normal assert()" OFF)
 #if(DISABLE_CUSTOM_ASSERT)

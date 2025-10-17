@@ -22,6 +22,8 @@ int main(int argc, char** argv)
 	slogf(_T("test %s!\n"), "foo");
 	slogf(_T("test\nnewline:%s!\n"), "bar");
 
+	//slogf(_T("unknown!\n"), "bar");
+
 #if 0 // no way to modify the cvars...
 	if(!save_cvar())
 	{

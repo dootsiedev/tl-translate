@@ -2,11 +2,8 @@
 
 #include "core/global.h"
 
-#ifdef TL_PERFECT_HASH_TRANSLATION
-// because I awkwardly need translate_hash_type
-// should be a header if the constexpr hash is more than 100 lines
+// NOTE: I could clean this up so that I don't include this.
 #include "translate.h"
-#endif
 
 #include <vector>
 
@@ -63,31 +60,27 @@ struct translation_context
 		std::string translation_file;
 	};
 
-	bool on_header(tl_header_tuple& header) override;
-	bool on_info(tl_info_tuple& header) override;
-	bool on_translation(std::string&& key, std::string&& value) override;
+	const char* on_header(tl_header_tuple& header) override;
+	const char* on_info(tl_info_tuple& header) override;
+	const char* on_translation(std::string&& key, std::string&& value) override;
 
 	std::vector<language_entry> language_list;
 
-	// loaded translation.
-	std::map<std::string, std::string> strings;
-
-	// TODO: this was the faster option, but I want to try using std::map first.
-#if 0
 	// a string that contains null terminating strings.
-	// maybe I could insitu load the file, but I was thinking of using a basic arena.
+	// maybe I could insitu load the file,
+	// or just use an arena.
 	std::string memory;
 
-	// probably sorted so that I can use a faster lookup.
-	std::vector<std::string_view> translations;
-
-#endif
+	// I lookup a string based off english_ref.inl
+	// so the ID is ordered based on the location the string is in the english_ref.inl
+	// this contains the offset inside of memory.
+	// uint16_t might be small, but if you had more than 65k letters,
+	// you probably need to use something different for better compile times (enums).
+	std::vector<uint16_t> translations;
 
 #ifdef TL_PERFECT_HASH_TRANSLATION
-	std::vector<translate_hash_type> hash_keys;
 	const char* get_hashed_text(const char* text, translate_hash_type hash);
 #else
-	std::vector<std::string_view> keys;
 	const char* get_text(const char* text);
 #endif
 

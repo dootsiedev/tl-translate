@@ -1,5 +1,4 @@
-// this is only used for TL_COMPILE_TIME_TRANSLATION
-
+// complements tl_begin_macro.txt
 #undef TL_START
 #undef TL_END
 #undef TL

@@ -1,5 +1,3 @@
-// this is only used for TL_COMPILE_TIME_TRANSLATION
-
 // ignore undefined macros for convenience.
 #ifndef TL_START
 #define TL_START(...)

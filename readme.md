@@ -14,7 +14,7 @@ it has the neat ability to switch between compile time hardcoded translations or
 # TL_COMPILE_TIME_TRANSLATION = ON (on by default)
 - useful because you don't need to worry about finding the path to the translations, and it does not require dependencies.
 - the cmake build directory does not need a copy or path to the translations folder
-- if the number of strings are small, you can use TL_COMPILE_TIME_ASSERTS to manually sync the translations using compile time asserts (see tl-extract-strings)
+- if the number of strings are small, you can use TL_COMPILE_TIME_ASSERTS(off by default) to manually sync the translations using compile time asserts (see tl-extract-strings)
 
 # TL_COMPILE_TIME_TRANSLATION = OFF
 - runtime translations are useful because you don't need to recompile the binary to change strings.

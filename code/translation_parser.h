@@ -30,9 +30,9 @@ typedef std::tuple<std::string, std::string, int> tl_info_tuple;
 class parse_observer
 {
 public:
-	virtual bool on_header(tl_header_tuple& header) = 0;
-	virtual bool on_info(tl_info_tuple& header) = 0;
-	virtual bool on_translation(std::string&& key, std::string&& value) = 0;
+	virtual const char* on_header(tl_header_tuple& header) = 0;
+	virtual const char* on_info(tl_info_tuple& header) = 0;
+	virtual const char* on_translation(std::string&& key, std::string&& value) = 0;
 	virtual ~parse_observer() = default;
 };
 

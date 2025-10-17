@@ -91,10 +91,42 @@ bool translation_context::init()
 #include <filesystem>
 #include <iomanip>
 
+
+#ifdef __cpp_consteval
+#define MY_CONSTEVAL consteval
+#else
+#define MY_CONSTEVAL
+#endif
+
+static MY_CONSTEVAL uint16_t get_number_of_translations()
+{
+	uint16_t index = 0;
+#define TL_START(lang, ...) static_assert(std::string_view(#lang) == "English");
+#define TL(key, value) index++;
+#include "../translations/tl_begin_macro.txt"
+#include "../translations/english_ref.inl"
+#include "../translations/tl_end_macro.txt"
+	return index;
+}
+
+// This only gets the english memory size, which I use as an OK estimate.
+static MY_CONSTEVAL int get_translation_memory_size()
+{
+	// index 0 is uninitialized.
+	uint16_t size = 1;
+#define TL_START(lang, ...) static_assert(std::string_view(#lang) == "English");
+#define TL(key, value) size += std::string_view(key).size() + 1;
+#include "../translations/tl_begin_macro.txt"
+#include "../translations/english_ref.inl"
+#include "../translations/tl_end_macro.txt"
+	return size;
+}
+
 const char* translation_context::get_text(const char* text)
 {
-	// TODO: stub
-	return text;
+	// index 0 is uninitialized.
+	ASSERT_M(const_get_text(text) != 0 && "translation not found", text);
+	return memory.data() + translations[const_get_text(text)];
 }
 bool translation_context::init()
 {
@@ -113,6 +145,19 @@ bool translation_context::init()
 	{
 		if(std::filesystem::is_regular_file(dir_entry) && dir_entry.path().extension() == ".inl")
 		{
+			// TODO: temporary since I need to add more observers!
+			//  might keep this for !NDEBUG to validate
+			translations.clear();
+			// index 0 must be an error.
+			translations.resize(get_number_of_translations() + 1);
+			translations.push_back(0);
+			memory.clear();
+			// this is not a tight fitting size, this is the english size used as an estimate.
+			memory.reserve(get_translation_memory_size());
+			// the character used for the error index.
+			memory.push_back('@');
+			memory.push_back('\0');
+
 			std::string path = dir_entry.path().string();
 			slogf("info: found translation: %s\n", path.c_str());
 
@@ -148,7 +193,7 @@ bool translation_context::init()
 	return true;
 }
 
-bool translation_context::on_header(tl_header_tuple& header)
+const char* translation_context::on_header(tl_header_tuple& header)
 {
 #ifdef TL_PRINT_FILE
 	slogf(
@@ -160,9 +205,10 @@ bool translation_context::on_header(tl_header_tuple& header)
 	slogf("git hash: %s\n", std::get<tl_header_get::git_hash>(header).c_str());
 #endif
 
-	return true;
+	return nullptr;
 }
-bool translation_context::on_info(tl_info_tuple& info)
+// should be optional, but I like printing.
+const char* translation_context::on_info(tl_info_tuple& info)
 {
 #ifdef TL_PRINT_FILE
 	slogf(
@@ -173,9 +219,9 @@ bool translation_context::on_info(tl_info_tuple& info)
 		std::get<tl_info_get::function>(info).c_str(),
 		std::get<tl_info_get::line>(info));
 #endif
-	return true;
+	return nullptr;
 }
-bool translation_context::on_translation(std::string&& key, std::string&& value)
+const char* translation_context::on_translation(std::string&& key, std::string&& value)
 {
 #ifdef TL_PRINT_FILE
 	if(!key.empty() && key.back() == '\n')
@@ -196,7 +242,26 @@ bool translation_context::on_translation(std::string&& key, std::string&& value)
 		key.c_str(),
 		value.c_str());
 #endif
-	return true;
+	uint16_t index = const_get_text(key);
+	if(index == 0)
+	{
+		return "text not found";
+	}
+	ASSERT(index < translations.size());
+	if(translations[index] != 0)
+	{
+		return "duplicate entry";
+	}
+
+	//
+	uint16_t offset = memory.size();
+	memory.insert(memory.end(), value.begin(), value.end());
+	memory.push_back('\0');
+
+	// I don't set the c_str() address because of reallocation
+	// so at the end, I set the address offset.
+	translations[index] = offset;
+	return nullptr;
 }
 
 #endif // TL_COMPILE_TIME_TRANSLATION

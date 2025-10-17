@@ -123,30 +123,41 @@ using namespace bp::literals;
 auto const header_action = [](auto& ctx) {
 	auto & globals = bp::_globals(ctx);
 	tl_header_tuple& info = bp::_attr(ctx);
-	if(!globals.on_header(info))
+	const char* msg = globals.on_header(info);
+	if(msg != nullptr)
 	{
-		bp::_report_error(ctx, "<on_header>");
-		bp::_pass(ctx) = false;
+		std::string str = "<on_header>: ";
+		str += msg;
+		bp::_report_error(ctx, str.c_str());
+		//bp::_pass(ctx) = false;
 	}
 };
 auto const key_action = [](auto& ctx) {
 	auto & globals = bp::_globals(ctx);
 	auto& info = bp::_attr(ctx);
 
-	if(!globals.on_translation(std::move(std::get<0>(info)), std::move(std::get<1>(info))))
+	const char* msg = globals.on_translation(std::move(std::get<0>(info)), std::move(std::get<1>(info)));
+	if(msg != nullptr)
 	{
-		bp::_report_error(ctx, "<on_translation>");
-		bp::_pass(ctx) = false;
+		// I assume I don't need to print the key and value, because parser will print it for me.
+		std::string str = "<on_translation>: ";
+		str += msg;
+		//str_asprintf(str, "<on_translation>: %s", std::get<0>(info).c_str(), std::get<1>(info).c_str(), msg);
+		bp::_report_error(ctx, str.c_str());
+		//bp::_pass(ctx) = false;
 	}
 };
 
 auto const info_action = [](auto& ctx) {
 	auto & globals = bp::_globals(ctx);
 	tl_info_tuple& info = bp::_attr(ctx);
-	if(!globals.on_info(info))
+	const char* msg = globals.on_info(info);
+	if(msg != nullptr)
 	{
-		bp::_report_error(ctx, "<on_info>");
-		bp::_pass(ctx) = false;
+		std::string str = "<on_info>: ";
+		str += msg;
+		bp::_report_error(ctx, str.c_str());
+		//bp::_pass(ctx) = false;
 	}
 };
 
@@ -305,12 +316,10 @@ bool parse_translation_file(parse_observer& o, std::string_view file_contents, s
 
 	// TODO: cvar for tracing?
 	bool const success = bp::parse(file_contents, parse, tl_parser::skipper); //, bp::trace::on);
-	if(success)
+	if(!success)
 	{
-		slogf("result: ...\n");
-	}
-	else
-	{
+		// TODO: print more info if no error message is printed.
+		//  put the error message into a string?
 		serrf("error\n");
 	}
 	return success;

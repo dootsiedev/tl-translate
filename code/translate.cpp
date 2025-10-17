@@ -51,7 +51,7 @@ static void print_missing_translation(const char* text, bool found)
 // but this wont work if you have mutually exclusive macros (AKA #else).
 // but it's possible to make the AST parse multiple combinations using a feature matrix.
 // the domain still offers the benefit of performance (not my largest concern),
-// and I could use the AST to make sure that all the domain gaurded translations are using the
+// and I could use the AST to make sure that all the domain guarded translations are using the
 domain. const char* translate_gettext_domain(const char* text, TL_DOMAIN domain)
 {
 #ifdef TL_COMPILE_TIME_TRANSLATION
@@ -100,7 +100,14 @@ const char* translate_gettext(const char* text)
 	// TODO: print a warning that this string was not found.
 	return text;
 #else
-	return g_translation_context.get_text(text);
+	// TODO: this should be handled differently.
+	const char* result = g_translation_context.get_text(text);
+	if(result != nullptr)
+	{
+		return result;
+	}
+	print_missing_translation(text, false);
+	return text;
 #endif
 }
 
