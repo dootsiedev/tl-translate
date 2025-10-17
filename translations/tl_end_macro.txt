@@ -1,0 +1,8 @@
+// this is only used for TL_COMPILE_TIME_TRANSLATION
+
+#undef TL_START
+#undef TL_END
+#undef TL
+#undef INFO
+#undef UNRESOLVED
+#undef MAYBE

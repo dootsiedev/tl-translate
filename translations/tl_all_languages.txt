@@ -1,0 +1,4 @@
+// this is only used for TL_COMPILE_TIME_TRANSLATION
+// the translations are stored here.
+// english is not included.
+#include "japanese.inl"

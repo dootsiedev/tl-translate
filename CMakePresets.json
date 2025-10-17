@@ -1,0 +1,175 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "default",
+      "description": "Default build",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/../${sourceDirName}-${presetName}",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/../${sourceDirName}-${presetName}-install",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "USE_CPP23": false,
+        "TL_COMPILE_TIME_TRANSLATION": false
+      }
+    },
+    {
+      "name": "platform",
+      "description": "msvc build",
+      "hidden": true,
+      "inherits": "default",
+      "generator": "Ninja",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
+        "NO_ANALYZE": true
+      },
+      "environment": {
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/triplets"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "debug-san",
+      "description": "debug with address sanitizer",
+      "inherits": "platform",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "my-x64-windows-asan",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebugDLL",
+        "USE_ASAN": true
+      }
+    },
+    {
+      "name": "reldeb",
+      "description": "release with debug info",
+      "inherits": "platform",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "USE_SIMPLE_HARDEN": true,
+        "NO_EXCEPTIONS": true,
+        "NO_RTTI": true
+      }
+    },
+    {
+      "name": "release",
+      "description": "release",
+      "inherits": "platform",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "CMAKE_BUILD_TYPE": "Release",
+        "NO_EXCEPTIONS": true,
+        "NO_RTTI": true,
+        "DISABLE_WIN32_TERM": true
+      }
+    },
+    {
+      "name": "clang-cl",
+      "description": "clang",
+      "hidden": true,
+      "inherits": "default",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "clang-debug-san",
+      "description": "debug build with asan and ubsan",
+      "inherits": "clang-cl",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-win-llvm-san-static",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebug",
+        "USE_ASAN": true,
+        "USE_UBSAN": true
+      }
+    },
+    {
+      "name": "clang-reldeb",
+      "description": "release with debug info, mainly for comparing with msvc reldeb",
+      "inherits": "clang-cl",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-win-llvm",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "USE_SIMPLE_HARDEN": true
+      }
+    },
+    {
+      "name": "clang-reldeb-san",
+      "description": "static release with debug info with asan and ubsan",
+      "inherits": "clang-cl",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-win-llvm-san-static",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
+        "USE_ASAN": true,
+        "USE_UBSAN": true,
+        "USE_LTO": true
+      }
+    },
+    {
+      "name": "clang-cfi",
+      "description": "static release with debug info with hardening",
+      "inherits": "clang-cl",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-win-llvm-lto-cfi-rel",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
+        "USE_LTO": true,
+        "USE_CFI": true,
+        "USE_SIMPLE_HARDEN": true
+      }
+    },
+    {
+        "name": "gcc-linux",
+        "inherits": "default",
+        "hidden": true,
+        "description": "gcc",
+        "generator": "Unix Makefiles",
+        "architecture": {
+            "value": "x64",
+            "strategy": "external"
+        },
+        "cacheVariables": {
+            "CMAKE_C_COMPILER": "gcc",
+            "CMAKE_CXX_COMPILER": "g++",
+            "CMAKE_MAKE_PROGRAM": "make",
+            "VCPKG_TARGET_TRIPLET": "x64-linux"
+        },
+        "condition": {
+            "type": "equals",
+            "lhs": "${hostSystemName}",
+            "rhs": "Linux"
+        }
+    },{
+      "name": "linux-debug-san",
+      "description": "debug build with asan and ubsan",
+      "inherits": "gcc-linux",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "USE_ASAN": true,
+        "USE_UBSAN": true,
+        "USE_SIMPLE_HARDEN": true
+      }
+    }
+  ],
+  "testPresets": [],
+  "buildPresets": []
+}
