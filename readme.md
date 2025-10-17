@@ -37,11 +37,8 @@ For now, I will just avoid hiding translations in macros for as long I can until
 the second downside is that compiling the string extractor needs LLVM, which is a huge library...
 (vcpkg has llvm, not sure how usable it will be...)
 
-and the third downside is that I don't have a fuzzy matcher, I can try to match using source line info, and whole words,
-otherwise, I am thinking about usingAI for fuzzy matching, but will add 100 libs as a dependency + annoying...
-
 it should be noted that the language depends on a generic cvar variable (cvar.cfg or argv)
 which means that any parsing errors before loading the translation will not be translated.
--This is not a big issue in my opinion, since the cvar values are english, so the errors should also be english.
--I could lazy load the translation on the first string found using the global variable LANG, but don't make any translations while parsing the cvar.cfg file, yet.
--(I am considering the ASSERT dialog, but it will be difficult to make sure _T("") won't call ASSERT... I will probably initialize the assert dialog strings externally...).
+- This is not a big issue in my opinion, since the cvar values are english, so the errors should also be english.
+- I could lazy load the translation on the first string found using the global variable LANG, but don't make any translations while parsing the cvar.cfg file, yet.
+- (I am considering the ASSERT dialog, but it will be difficult to make sure _T("") won't call ASSERT... I will probably initialize the assert dialog strings externally...).
