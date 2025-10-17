@@ -22,7 +22,7 @@
 // msvc release build is 300kb, and includes 10mb of debug info (50kb + 3mb with TL_COMPILE)
 // msvc debug-san build is 3mb and 30mb of debug info (600kb + 2mb with TL_COMPILE)
 //
-// msvc clang crash if an exception is thrown unless it's reldeb (dunno why, update clang?)
+// msvc clang crash if an exception is thrown unless it's reldeb & no asan (dunno why, update clang?)
 // clang-cfi crashes clang during linking (try separate add_library, or update clang?)
 // tons of ubsan implicit conversion errors (separate add_library? or suppressions?)
 //

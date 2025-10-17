@@ -25,7 +25,7 @@ include(GNUInstallDirs)
 option(PORTABLE "Helps bundle DLL's when you install, also sets rpath on linux" OFF)
 
 #for clang-cl
-#clang-cl.exe acts exactly like MSVC (drag-n-drop replacement), 
+#clang-cl.exe acts exactly like MSVC (drag-n-drop replacement),
 #but you can use clang++.exe which can generate exactly the same binary,
 #but with different command line syntax (and MSVC=FALSE and GNUC=TRUE).
 #so MY_CLANGCL means both MSVC and the GNUC.
@@ -95,7 +95,7 @@ endif()
 
 if (MSVC)
     #set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_DEPRECATE /D_SCL_SECURE_NO_WARNINGS /DNOMINMAX)
-	
+
     set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /wd4244) # C4244: 'conversion_type': conversion from 'type1' to 'type2', possible loss of data
     set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /wd4068) # C4068: unknown pragma
 
@@ -112,7 +112,7 @@ if (MSVC)
 	option(NO_ANALYZE "disable msvc /analyze, required for slogf formatting warnings (but /analyze is slow)" ${MY_CLANGCL})
 	if(NOT NO_ANALYZE)
 		# will this enable SAL warnings for _Printf_format_string_
-		set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /analyze) 
+		set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /analyze)
 	endif()
 
 
@@ -120,7 +120,7 @@ if (MSVC)
         # for __VA_OPT__ (I don't use it ATM)
         set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /Zc:preprocessor)
 	else()
-		# msvc C++17 is permissive by default 
+		# msvc C++17 is permissive by default
 		# which means RVO can give different side effects between debug/release
 		set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /permissive-)
     endif()
@@ -135,7 +135,7 @@ if (MSVC)
         # much smaller binary.
         set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /OPT:REF")
     endif()
-	
+
     if(NO_RTTI)
 		string( REPLACE "/GR" "/GR-" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
         #set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /GR-)
@@ -144,14 +144,14 @@ if (MSVC)
 		string( REPLACE "/EHsc" "/EHs-" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
         set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /D_HAS_EXCEPTIONS=0)
     endif()
-	
+
     #silence the warnings for flags that are incompatible with asan
     if(USE_ASAN)
         #string( REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO}")
         string( REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG}")
     endif()
 else()
-    
+
     if(NO_RTTI)
         set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -fno-rtti)
     endif()
@@ -228,7 +228,7 @@ else()
     endif()
 
     ADD_CHECK_CXX_COMPILER_FLAG(MY_COMPILER_FLAGS CXX_WARN_ENUM_CONVERSION -Wenum-conversion)
-    
+
 
     set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -Wall -Wextra -Wpedantic)
     set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -Wunused -Wundef -Wmissing-declarations -Wvla)
@@ -238,7 +238,7 @@ else()
     if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
         set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -fno-omit-frame-pointer)
     endif()
-    
+
 endif()
 
 #
@@ -296,7 +296,7 @@ if(USE_UBSAN)
 	if(MY_CLANGCL AND CMAKE_MSVC_RUNTIME_LIBRARY STREQUAL "MultiThreadedDLL")
         message(WARNING "USE_UBSAN needs CMAKE_MSVC_RUNTIME_LIBRARY to equal MultiThreaded because ubsan only works with the static runtime ATM")
 	endif()
-	
+
 	target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize=undefined)
 	#make the application stop
 	#target_compile_options(ALL_SANITIZERS INTERFACE -fno-sanitize-recover=all)
@@ -384,9 +384,9 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         #target_compile_options(ALL_SANITIZERS INTERFACE -flto)
         #target_link_options(ALL_SANITIZERS INTERFACE -flto)
 
-        #visibility hidden is required 
+        #visibility hidden is required
         target_compile_options(ALL_SANITIZERS INTERFACE -fvisibility=hidden)
-        
+
         #on my system, std::to_string would cause an indirect call error...
         #maybe that is libstd++'s fault, maybe libc is needed.
         target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize=cfi)# -fno-sanitize=cfi-icall -fsanitize-cfi-icall-generalize-pointers)
@@ -454,7 +454,7 @@ if(EMSCRIPTEN)
     #NOTE: for USE_ASAN I need -sINITIAL_MEMORY=159391744, and it only works when I use CMAKE_EXE_LINKER_FLAGS
     #TODO: removing NDEBUG isn't enough to enable asserts for some reason. So don't use RelWithDebInfo, use Debug...
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
-    #I need source-maps because I wanted to get EM_LOG_C_STACK working, 
+    #I need source-maps because I wanted to get EM_LOG_C_STACK working,
     #but all the paths leads to "stdlib_typeinfo.cpp:18:0", and I tried enabling/disabling RTTI
     #requires: emrun --port 9090 --serve_root / .
     #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -gsource-map -sLOAD_SOURCE_MAP=1 --source-map-base http://localhost:9090/")
@@ -482,14 +482,14 @@ endif()
 add_executable(${PROJECT_NAME}
         #$<$<BOOL:${WIN32}>:gltest.exe.manifest resource.rc>
         code/main.cpp
-		
+
 		code/translate.h
 		code/translate.cpp
 		code/translation_context.h
 		code/translation_context.cpp
 		code/translation_parser.h
 		code/translation_parser.cpp
-		
+
         code/core/global_pch.h
         code/core/global.h
         code/core/global.cpp
@@ -526,9 +526,10 @@ else()
     # boost spirit takes up 500mb by default, and that's just for windows-x64...
     #find_package(Boost CONFIG REQUIRED COMPONENTS spirit)
     #target_link_libraries(${PROJECT_NAME} Boost::spirit)
-    # boost parser works standalone (but needs boost hana for structs)
+
+    # boost parser works standalone (but needs boost hana for structs, I use tuples atm)
     # but boost parser needs C++ exceptions (ew).
-    # I don't know why but failing to parse always leads to UB (I think clang-cl does not work with exceptions?)
+    # I don't know why but debug clang (msvc) will crash on exceptions (invalid access, but reldeb works)
     target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/parser/include")
 endif()
 
@@ -716,7 +717,7 @@ if(PORTABLE OR WIN32)
 
     message(STATUS "MY_DEPENDENCY_PATHS: ${MY_DEPENDENCY_PATHS}")
     install(CODE "set(MY_DEPENDENCY_PATHS \"${MY_DEPENDENCY_PATHS}\")")
-    
+
     # Transfer the value of ${MY_DEPENDENCY_PATHS} into the install script
 	install(CODE "set(MY_DESTINATION_PATH \"${CMAKE_INSTALL_PREFIX}/${EXECUTABLE_INSTALLATION_PATH}\")")
     install(CODE "set(MY_EXECUTABLE_NAME \"$<TARGET_FILE:${PROJECT_NAME}>\")")

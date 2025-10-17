@@ -112,13 +112,13 @@
     },
     {
       "name": "clang-reldeb-san",
-      "description": "static release with debug info with asan and ubsan",
+      "description": "static release with debug info with asan and ubsan (ASAN is disabled because it works without exceptions?)",
       "inherits": "clang-cl",
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "x64-win-llvm-san-static",
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
-        "USE_ASAN": true,
+        "USE_ASAN": false,
         "USE_UBSAN": true,
         "USE_LTO": true
       }
