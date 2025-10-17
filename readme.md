@@ -23,6 +23,7 @@ it has the neat ability to switch between compile time hardcoded translations or
 - At the moment you need to copy the boost parser repo directly into the source tree in a folder named "parser" (TODO: use either FetchContent or vcpkg)
 
 # tl-extract-strings
+- this will go through your source files and find each _T("") and update the .inl translation files.
 - (TODO: INSERT LINK TO PROJECT HERE)
 - LLVM AST parser + maybe use compile_commands.json
 - you should use it as a prebuilt binary
