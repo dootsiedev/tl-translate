@@ -5,44 +5,16 @@
 // sanity check.
 static_assert(L'☃' == L'\x2603', "File encoding appears not to be UTF-8");
 
-// found means that you found the string, but it's NULL: TL("something", NULL)
-static void print_missing_translation(const char* text, bool found)
-{
-	// TODO: should be thread local, and just make a thread_local a macro for emscripten
-	static int counter = 0;
-	static const char* prev_string = nullptr;
-	// TODO: add cvar max counter
-	static int max_counter = 10;
-
-	if(counter >= max_counter)
-	{
-		return;
-	}
-	if(prev_string == text)
-	{
-		return;
-	}
-	counter++;
-	prev_string = text;
-
-	// missing translation means you did not run the extractor,
-	// or the extractor missed the string somehow (not in the file).
-	// NULL translation means the text was never translated  TL("something", NULL)
-	// NOTE: If my logs were noisy, it would be nice if there was a exit report for warnings/info.
-	slogf("<%s: <start>%s<end>>\n", found ? "NULL translation" : "missing translation", text);
-
-	if(counter >= max_counter)
-	{
-		slogf("info: missing translation counter reached (%d), no more will be shown.\n", 10);
-	}
-}
-
-#ifdef TL_COMPILE_TIME_TRANSLATION
-// switch statement entry
-#define TL_START(lang, ...) case TL_LANG::lang:
-#define TL_END() break;
+#ifdef TL_COMPILE_TIME_ASSERTS
+// I don't think the static_assert is neccessary, but I can't figure out how lambdas works.
+static_assert([] {
+#define TL(key, value) static_assert(const_get_text(key) != 0, "translation not found");
 #include "../translations/tl_begin_macro.txt"
-#endif // TL_COMPILE_TIME_TRANSLATION
+#include "../translations/tl_all_languages.txt"
+#include "../translations/tl_end_macro.txt"
+	return true;
+}());
+#endif
 
 /*
 // I don't need domains, but it could help with macro hidden translations (stinky code).
@@ -67,38 +39,17 @@ text; #include "translation_languages.inl" #undef TL_D #undef TL
 const char* translate_gettext(const char* text)
 {
 #ifdef TL_COMPILE_TIME_TRANSLATION
-	switch(g_translation_context.get_lang())
+	switch(g_translation_context.current_lang)
 	{
-// for !NDEBUG, do things a little bit slower.
-#ifndef NDEBUG
-// every english template entry is unimplemented, so remove print_missing_translation
-#undef TL
-#define TL(x, y) \
-	if(strcmp(x, text) == 0) return (y != nullptr) ? y : text;
-#include "../translations/english_ref.inl"
-#undef TL
-#define TL(x, y)                                   \
-	if(strcmp(x, text) == 0)                       \
-	{                                              \
-		if(y == nullptr)                           \
-		{                                          \
-			print_missing_translation(text, true); \
-			return text;                           \
-		}                                          \
-		return y;                                  \
-	}
+// switch statement entry
+#define TL_START(lang, ...) case TL_LANG::lang:
+#define TL(x, y) if(strcmp(x, text) == 0) return (y != nullptr) ? y : text;
+#define TL_END() break;
+#include "../translations/tl_begin_macro.txt"
 #include "../translations/tl_all_languages.txt"
-#else // NDEBUG
-	case TL_LANG::English: return text;
-#undef TL
-#define TL(x, y) \
-	if(strcmp(x, text) == 0) return (y != nullptr) ? y : text;
-#include "../translations/tl_all_languages.txt"
-#endif // NDEBUG
+#include "../translations/tl_end_macro.txt"
 	}
-	print_missing_translation(text, false);
-	// TODO: print a warning that this string was not found.
-	return text;
+
 #else
 	// TODO: this should be handled differently.
 	const char* result = g_translation_context.get_text(text);
@@ -130,7 +81,3 @@ const char* translate_hash(const char* text, translate_hash_type hash)
 #endif // TL_COMPILE_TIME_TRANSLATION
 }
 #endif // TL_PERFECT_HASH_TRANSLATION
-
-#ifdef TL_COMPILE_TIME_TRANSLATION
-#include "../translations/tl_end_macro.txt"
-#endif

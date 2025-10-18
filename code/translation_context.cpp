@@ -63,13 +63,13 @@ bool translation_context::init()
 		slogf("-%s\n", get_lang_string(entry));
 	}
 
-	slogf("Using Language: %s\n", get_lang_string(g_translation_context.get_lang()));
+	slogf("Using Language: %s\n", cv_language->c_str());
 
 // I would use a case insensitive compare if I had one.
 #define TL_START(lang, lang_short, ...)                                  \
 	if(cv_language.data() == #lang || cv_language.data() == #lang_short) \
 	{                                                                    \
-		g_translation_context.set_lang(TL_LANG::lang);                   \
+		current_lang = TL_LANG::lang;                                    \
 		return true;                                                     \
 	}
 #include "../translations/tl_begin_macro.txt"

@@ -34,14 +34,6 @@ struct translation_context
 #ifdef TL_COMPILE_TIME_TRANSLATION
 	// TODO: should be a cvar
 	TL_LANG current_lang = TL_LANG::English;
-	TL_LANG get_lang() const
-	{
-		return current_lang;
-	}
-	void set_lang(TL_LANG lang)
-	{
-		current_lang = lang;
-	}
 #else // TL_COMPILE_TIME_TRANSLATION
 
 	// TODO: this should be a cvar
