@@ -51,14 +51,21 @@ struct translation_context
 
 	struct language_entry
 	{
-		std::string long_enum;
+		std::string long_name;
 		// en / jp
-		std::string short_enum;
+		std::string short_name;
 		// non-english id.
 		std::string native_name;
-		// path to translation.
+		// path to translation
 		std::string translation_file;
 	};
+
+	// I don't want 2 observers (one for headers, and one for strings),
+	// so instead I check init_languages.
+	bool parse_headers = false;
+	// pass the path of the file here.
+	// NOTE: would a fs::path be any faster?
+	std::string loading_path;
 
 	const char* on_header(tl_header_tuple& header) override;
 	const char* on_info(tl_info_tuple& header) override;

@@ -114,6 +114,14 @@ bool debug_write_function_info(debug_stacktrace_observer& printer, void* address
 #ifndef __cpp_lib_stacktrace
 #define __cpp_lib_stacktrace 0
 #endif
+// I am too lazy to replace __cpp_lib_stacktrace with USE_CPP_STACKTRACE
+// I just undef it.
+#ifndef USE_CPP_STACKTRACE
+#if __cpp_lib_stacktrace
+#undef __cpp_lib_stacktrace
+#define __cpp_lib_stacktrace 0
+#endif
+#endif
 #if __cpp_lib_stacktrace && !defined(HAS_STACKTRACE_PROBABLY)
 // Disable C++23 stacktrace if I am using CFI sanitizer.
 #ifdef MY_FIX_CFI_ICALL

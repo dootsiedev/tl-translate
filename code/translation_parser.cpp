@@ -41,7 +41,7 @@
 
 #ifndef TL_COMPILE_TIME_TRANSLATION
 
-#include "translation_context.h"
+#include "translation_parser.h"
 
 
 // custom assert, boost parser also has BOOST_PARSER_NO_RUNTIME_ASSERTIONS

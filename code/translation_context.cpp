@@ -89,16 +89,10 @@ bool translation_context::init()
 
 // I would have used SDL because I don't want to use a library I don't need to use...
 #include <filesystem>
-#include <iomanip>
 
 
-#ifdef __cpp_consteval
-#define MY_CONSTEVAL consteval
-#else
-#define MY_CONSTEVAL
-#endif
 
-static MY_CONSTEVAL uint16_t get_number_of_translations()
+static constexpr uint16_t get_number_of_translations()
 {
 	uint16_t index = 0;
 #define TL_START(lang, ...) static_assert(std::string_view(#lang) == "English");
@@ -110,7 +104,7 @@ static MY_CONSTEVAL uint16_t get_number_of_translations()
 }
 
 // This only gets the english memory size, which I use as an OK estimate.
-static MY_CONSTEVAL int get_translation_memory_size()
+static constexpr int get_translation_memory_size()
 {
 	// index 0 is uninitialized.
 	uint16_t size = 1;
@@ -130,6 +124,7 @@ const char* translation_context::get_text(const char* text)
 }
 bool translation_context::init()
 {
+	parse_headers = true;
 	std::filesystem::path translations_path(u8"translations");
 	if(!std::filesystem::exists(translations_path))
 	{
@@ -145,25 +140,15 @@ bool translation_context::init()
 	{
 		if(std::filesystem::is_regular_file(dir_entry) && dir_entry.path().extension() == ".inl")
 		{
-			// TODO: temporary since I need to add more observers!
-			//  might keep this for !NDEBUG to validate
-			translations.clear();
-			// index 0 must be an error.
-			translations.resize(get_number_of_translations() + 1);
-			translations.push_back(0);
-			memory.clear();
-			// this is not a tight fitting size, this is the english size used as an estimate.
-			memory.reserve(get_translation_memory_size());
-			// the character used for the error index.
-			memory.push_back('@');
-			memory.push_back('\0');
-
-			std::string path = dir_entry.path().string();
-			slogf("info: found translation: %s\n", path.c_str());
+			// this string gets moved after loading the header.
+			// but I think it would still just work because I am using a string_view.
+			// unless
+			loading_path = dir_entry.path().string();
+			slogf("info: found translation: %s\n", loading_path.c_str());
 
 			std::string str;
 			// copy the file into the string
-			if(!slurp_stdio(str, path.c_str()))
+			if(!slurp_stdio(str, loading_path.c_str()))
 			{
 				return false;
 			}
@@ -176,7 +161,7 @@ bool translation_context::init()
 			// TODO: make a parse_translation_header for performance...
 			//  but I do like that it makes sure no errors exist.
 			//  maybe keep it for !NDEBUG?
-			if(!parse_translation_file(*this, str, path))
+			if(!parse_translation_file(*this, str, loading_path))
 			{
 				return false;
 			}
@@ -184,13 +169,59 @@ bool translation_context::init()
 			TIMER_U t2 = timer_now();
 			slogf("time: %" TIMER_FMT "\n", timer_delta_ms(t1, t2));
 #endif
-
-			language_entry data;
-
-			// language_list.push_back()
 		}
 	}
-	return true;
+	parse_headers = false;
+
+	translations.clear();
+	// index 0 must be an error.
+	translations.resize(get_number_of_translations() + 1);
+	translations.push_back(0);
+	memory.clear();
+	// this is not a tight fitting size, this is the english size used as an estimate.
+	memory.reserve(get_translation_memory_size());
+	// the character used for the error index.
+	memory.push_back('@');
+	memory.push_back('\0');
+
+	slogf("Languages Available:\n");
+	for(auto& lang : language_list)
+	{
+		slogf("-%s\n", lang.long_name.c_str());
+	}
+
+	for(auto& lang: language_list)
+	{
+		if(lang.long_name != cv_language->c_str() && lang.short_name != cv_language->c_str())
+		{
+			continue;
+		}
+		slogf("Using Language: %s\n", lang.long_name.c_str());
+
+		std::string str;
+		// copy the file into the string
+		if(!slurp_stdio(str, lang.translation_file.c_str()))
+		{
+			return false;
+		}
+#ifdef CHECK_TIMER
+		// small file with like 1000 characters
+		// 0.2 - 0.05 ms on reldeb, 10ms on debug san.
+		TIMER_U t1 = timer_now();
+#endif
+		if(!parse_translation_file(*this, str, lang.translation_file))
+		{
+			return false;
+		}
+#ifdef CHECK_TIMER
+		TIMER_U t2 = timer_now();
+		slogf("time: %" TIMER_FMT "\n", timer_delta_ms(t1, t2));
+#endif
+		return true;
+	}
+	serrf("Failed to find language (%s): %s\n", cv_language.cvar_key, cv_language->c_str());
+
+	return false;
 }
 
 const char* translation_context::on_header(tl_header_tuple& header)
@@ -204,6 +235,18 @@ const char* translation_context::on_header(tl_header_tuple& header)
 	slogf("date: %s\n", std::get<tl_header_get::date>(header).c_str());
 	slogf("git hash: %s\n", std::get<tl_header_get::git_hash>(header).c_str());
 #endif
+
+	if(parse_headers)
+	{
+		// I should use emplace_back and designated initializers, but I use C++17.
+		language_entry entry;
+		entry.long_name = std::get<tl_header_get::long_name>(header);
+		entry.short_name = std::get<tl_header_get::short_name>(header);
+		entry.native_name = std::get<tl_header_get::native_name>(header);
+		// I am tempted to move this in, but this string is being used by the parser...
+		entry.translation_file = loading_path;
+		language_list.push_back(std::move(entry));
+	}
 
 	return nullptr;
 }
@@ -242,6 +285,11 @@ const char* translation_context::on_translation(std::string&& key, std::string&&
 		key.c_str(),
 		value.c_str());
 #endif
+	if(parse_headers)
+	{
+		// I only care about the header
+		return nullptr;
+	}
 	uint16_t index = const_get_text(key);
 	if(index == 0)
 	{
@@ -253,7 +301,13 @@ const char* translation_context::on_translation(std::string&& key, std::string&&
 		return "duplicate entry";
 	}
 
-	//
+	// this is a hack because my parser will accept NULL as a string.
+	// I need to either use const char* or std::optional<std::string>
+	if(value == "NULL")
+	{
+		value = std::move(key);
+	}
+
 	uint16_t offset = memory.size();
 	memory.insert(memory.end(), value.begin(), value.end());
 	memory.push_back('\0');

@@ -589,9 +589,17 @@ endif()
 #find_package(SDL3 CONFIG REQUIRED)
 #target_link_libraries(${PROJECT_NAME} SDL3::SDL3)
 
-# USE_CPP23 has <stacktrace> and it is used if nothing else is set,
-# but it runs slower. I don't know how to print the DLL name.
-# and it lacks the dbghelp thread context feature (watchdog), and function pointer info.
+# use <stacktrace>
+# it runs slower compared to dbghelp and libbacktrace (a stutter)
+# it lacks the dbghelp thread context feature (watchdog), and function pointer info.
+# it also wont work with msvc clang cfi, and ubsan might also print some implicit conversion on msvc.
+option(USE_CPP_STACKTRACE "use <stacktrace> to print stack traces, requires USE_CPP23" OFF)
+if(USE_CPP_STACKTRACE)
+    if(NOT USE_CPP23)
+        message(warning "USE_CPP23 is required.")
+    endif()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_CPP_STACKTRACE)
+endif()
 
 # this technically should work with mingw, but it won't print non-mingw symbols which is bad
 # maybe vcpkg could work, I have not tried.
