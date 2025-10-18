@@ -6,7 +6,7 @@
 static_assert(L'☃' == L'\x2603', "File encoding appears not to be UTF-8");
 
 #ifdef TL_COMPILE_TIME_ASSERTS
-// I don't think the static_assert is neccessary, but I can't figure out how lambdas works.
+// you should compile this file at the end of the cmake lists so that english translations are done first.
 static_assert([] {
 #define TL(key, value) static_assert(const_get_text(key) != 0, "translation not found");
 #include "../translations/tl_begin_macro.txt"
@@ -46,10 +46,12 @@ const char* translate_gettext(const char* text)
 #define TL(x, y) if(strcmp(x, text) == 0) return (y != nullptr) ? y : text;
 #define TL_END() break;
 #include "../translations/tl_begin_macro.txt"
+#include "../translations/english_ref.inl"
 #include "../translations/tl_all_languages.txt"
 #include "../translations/tl_end_macro.txt"
 	}
-
+	ASSERT_M("translation not found", text);
+	return text;
 #else
 	// TODO: this should be handled differently.
 	const char* result = g_translation_context.get_text(text);
