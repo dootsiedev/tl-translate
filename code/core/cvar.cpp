@@ -1474,7 +1474,7 @@ CVAR_LOAD load_cvar(int argc, char** argv)
 		}
 		if(argv[i][0] == '+')
 		{
-			slogf("%d\n", argc);
+			//slogf("%d\n", argc);
 			int ret = cvar_arg(CVAR_T::STARTUP, argc - i, argv + i);
 			if(ret == -1)
 			{

@@ -31,8 +31,7 @@ static REGISTER_CVAR_INT(
 
 const char* get_lang_string(TL_LANG lang)
 {
-#define TL_START(lang, ...) \
-	case TL_LANG::lang: return #lang;
+#define TL_START(lang, ...) case TL_LANG::lang: return #lang;
 #include "../translations/tl_begin_macro.txt"
 	switch(lang)
 	{
@@ -76,7 +75,6 @@ bool translation_context::init()
 #include "../translations/english_ref.inl"
 #include "../translations/tl_all_languages.txt"
 #include "../translations/tl_end_macro.txt"
-#undef TL_START
 	serrf(
 		"failed to find language (%s = `%s`)\n", cv_language.cvar_key, cv_language.data().c_str());
 	// TODO: print a list of languages
@@ -84,6 +82,9 @@ bool translation_context::init()
 }
 
 #else // TL_COMPILE_TIME_TRANSLATION
+
+
+#include "translate_get_index.h"
 
 #include "core/RWops.h"
 
@@ -95,7 +96,6 @@ bool translation_context::init()
 static constexpr uint16_t get_number_of_translations()
 {
 	uint16_t index = 0;
-#define TL_START(lang, ...) static_assert(std::string_view(#lang) == "English");
 #define TL(key, value) index++;
 #include "../translations/tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
@@ -108,7 +108,6 @@ static constexpr int get_translation_memory_size()
 {
 	// index 0 is uninitialized.
 	uint16_t size = 1;
-#define TL_START(lang, ...) static_assert(std::string_view(#lang) == "English");
 #define TL(key, value) size += std::string_view(key).size() + 1;
 #include "../translations/tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
@@ -118,9 +117,10 @@ static constexpr int get_translation_memory_size()
 
 const char* translation_context::get_text(const char* text)
 {
+	ASSERT(text != NULL);
 	// index 0 is uninitialized.
-	ASSERT_M(const_get_text(text) != 0 && "translation not found", text);
-	return memory.data() + translations[const_get_text(text)];
+	ASSERT_M(get_text_index(text) != 0 && "translation not found", text);
+	return memory.data() + translations[get_text_index(text)];
 }
 bool translation_context::init()
 {
@@ -140,9 +140,7 @@ bool translation_context::init()
 	{
 		if(std::filesystem::is_regular_file(dir_entry) && dir_entry.path().extension() == ".inl")
 		{
-			// this string gets moved after loading the header.
-			// but I think it would still just work because I am using a string_view.
-			// unless
+			// loading_path is used for the parsing callbacks.
 			loading_path = dir_entry.path().string();
 			slogf("info: found translation: %s\n", loading_path.c_str());
 
@@ -159,8 +157,6 @@ bool translation_context::init()
 			TIMER_U t1 = timer_now();
 #endif
 			// TODO: make a parse_translation_header for performance...
-			//  but I do like that it makes sure no errors exist.
-			//  maybe keep it for !NDEBUG?
 			if(!parse_translation_file(*this, str, loading_path))
 			{
 				return false;
@@ -173,6 +169,7 @@ bool translation_context::init()
 	}
 	parse_headers = false;
 
+	// TODO: move this into a function
 	translations.clear();
 	// index 0 must be an error.
 	translations.resize(get_number_of_translations() + 1);
@@ -290,7 +287,7 @@ const char* translation_context::on_translation(std::string&& key, std::string&&
 		// I only care about the header
 		return nullptr;
 	}
-	uint16_t index = const_get_text(key);
+	uint16_t index = get_text_index(key);
 	if(index == 0)
 	{
 		return "text not found";

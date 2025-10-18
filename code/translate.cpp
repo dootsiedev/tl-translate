@@ -8,33 +8,13 @@ static_assert(L'☃' == L'\x2603', "File encoding appears not to be UTF-8");
 #ifdef TL_COMPILE_TIME_ASSERTS
 // you should compile this file at the end of the cmake lists so that english translations are done first.
 static_assert([] {
-#define TL(key, value) static_assert(const_get_text(key) != 0, "translation not found");
+#define TL(key, value) static_assert(get_text_index(key) != 0, "translation not found");
 #include "../translations/tl_begin_macro.txt"
 #include "../translations/tl_all_languages.txt"
 #include "../translations/tl_end_macro.txt"
 	return true;
 }());
 #endif
-
-/*
-// I don't need domains, but it could help with macro hidden translations (stinky code).
-// only the extraction merging cares about domains (to gracefully ignore domains).
-// But technically I could feed the AST parser compiler database macro defines
-// but this wont work if you have mutually exclusive macros (AKA #else).
-// but it's possible to make the AST parse multiple combinations using a feature matrix.
-// the domain still offers the benefit of performance (not my largest concern),
-// and I could use the AST to make sure that all the domain guarded translations are using the
-domain. const char* translate_gettext_domain(const char* text, TL_DOMAIN domain)
-{
-#ifdef TL_COMPILE_TIME_TRANSLATION
-	switch(g_translation_context.get_lang())
-	{
-		#define TL(...)
-		#define TL_D(d, x, y) if(d == domain && strcmp(x, text) == 0)  return (y != nullptr) ? y :
-text; #include "translation_languages.inl" #undef TL_D #undef TL
-	}
-}
-*/
 
 const char* translate_gettext(const char* text)
 {
@@ -53,14 +33,7 @@ const char* translate_gettext(const char* text)
 	ASSERT_M("translation not found", text);
 	return text;
 #else
-	// TODO: this should be handled differently.
-	const char* result = g_translation_context.get_text(text);
-	if(result != nullptr)
-	{
-		return result;
-	}
-	print_missing_translation(text, false);
-	return text;
+	return g_translation_context.get_text(text);
 #endif
 }
 
