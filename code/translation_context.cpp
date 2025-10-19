@@ -124,7 +124,7 @@ static constexpr uint16_t get_number_of_translations()
 	return index;
 }
 // used as a fallback to fix missing translations during runtime.
-inline constexpr const char* get_index_key(uint16_t find_index)
+static constexpr const char* get_index_key(uint16_t find_index)
 {
 	// index 0 is uninitialized.
 	uint16_t index = 1;
@@ -132,7 +132,7 @@ inline constexpr const char* get_index_key(uint16_t find_index)
 #include "../translations/tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
 #include "../translations/tl_end_macro.txt"
-	return 0;
+	return "<get_index_key:notfound>";
 }
 
 // This only gets the english memory size, which I use as an OK estimate.
@@ -423,7 +423,29 @@ const char* translation_context::on_header(tl_header_tuple& header)
 		// I am tempted to move this in, but this string is being used by the parser...
 		entry.translation_file = loading_path;
 		language_list.push_back(std::move(entry));
+		return nullptr;
 	}
+#ifndef NDEBUG
+	// make sure we are using the right language.
+	std::string& found_short = std::get<tl_header_get::short_name>(header);
+	if(current_lang == -1)
+	{
+		if(found_short != get_lang_short_name(TL_LANG::English))
+		{
+			slogf("expected english (got: %s)\n", found_short.c_str());
+			return "expected english";
+		}
+		return nullptr;
+	}
+	ASSERT(current_lang < language_list.size());
+	std::string& expected = language_list[current_lang].short_name;
+	if(expected != found_short)
+	{
+		// I should print the file location as well, too lazy.
+		slogf("unexpected language (expected: %s, got: %s)\n", expected.c_str(), found_short.c_str());
+		return "unexpected language";
+	}
+#endif
 
 	return nullptr;
 }
