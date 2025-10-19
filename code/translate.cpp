@@ -19,7 +19,7 @@ static_assert([] {
 const char* translate_gettext(const char* text)
 {
 #ifdef TL_COMPILE_TIME_TRANSLATION
-	switch(g_translation_context.current_lang)
+	switch(get_translation_context().current_lang)
 	{
 // switch statement entry
 #define TL_START(lang, ...) case TL_LANG::lang:
@@ -33,7 +33,7 @@ const char* translate_gettext(const char* text)
 	ASSERT_M("translation not found", text);
 	return text;
 #else
-	return g_translation_context.get_text(text);
+	return get_translation_context().get_text(text);
 #endif
 }
 

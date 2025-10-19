@@ -18,6 +18,6 @@ TL("test %s!\n", "てすと %s！\n")
 // (and the next time you run the string extractor, it should erase the propogated MAYBE for all translation files)
 //MAYBE("original string!", "2025", "(no git hash)")
 INFO("main.cpp","/code/main.cpp", 2)
-TL("test\nnewline:%s!\n", "てすと\nにゅうらいおん:%s！\n")
+TL("test\nnewline: %s!\n", "てすと\nにゅうらいおん: %s！\n")
 
 TL_END()

@@ -123,12 +123,13 @@ using namespace bp::literals;
 auto const header_action = [](auto& ctx) {
 	auto & globals = bp::_globals(ctx);
 	tl_header_tuple& info = bp::_attr(ctx);
+	// TODO: warnings? _pass?
 	const char* msg = globals.on_header(info);
 	if(msg != nullptr)
 	{
 		std::string str = "<on_header>: ";
 		str += msg;
-		bp::_report_error(ctx, str.c_str());
+		bp::_report_error(ctx, str);
 		//bp::_pass(ctx) = false;
 	}
 };
@@ -143,7 +144,7 @@ auto const key_action = [](auto& ctx) {
 		std::string str = "<on_translation>: ";
 		str += msg;
 		//str_asprintf(str, "<on_translation>: %s", std::get<0>(info).c_str(), std::get<1>(info).c_str(), msg);
-		bp::_report_error(ctx, str.c_str());
+		bp::_report_error(ctx, str);
 		//bp::_pass(ctx) = false;
 	}
 };
@@ -156,7 +157,7 @@ auto const info_action = [](auto& ctx) {
 	{
 		std::string str = "<on_info>: ";
 		str += msg;
-		bp::_report_error(ctx, str.c_str());
+		bp::_report_error(ctx, str);
 		//bp::_pass(ctx) = false;
 	}
 };
@@ -202,9 +203,10 @@ bp::symbols<uint32_t> const single_escaped_char_def = {
 auto const string_char_def =
 	('\\'_l > single_escaped_char) | (bp::cp - bp::char_(0x0000u, 0x001fu));
 
+// TODO: I want to add multi-line strings by "" \n ""
 auto const quoted_string_def = bp::lexeme['"' >> *(string_char - '"') > '"'];
 
-// I want to add _ but I don't know how.
+// this is not a true C compatible syntax
 auto const string_enum_def = bp::lexeme[+(bp::no_case[bp::char_('a', 'z')] | bp::char_('_'))];
 
 // clang-format off
@@ -276,8 +278,7 @@ struct logging_error_handler
 		std::ostringstream oss;
 		// NOLINTNEXTLINE(performance-unnecessary-value-param)
 		bp::write_formatted_expectation_failure_error_message(oss, filename_, first, last, e);
-		// TODO: this should not use serr, because the stacktrace is NOT useful!
-		//  at least not here... I should copy the message
+		// TODO: move this into the observer?
 		slog(oss.str().c_str());
 		return bp::error_handler_result::fail;
 	}

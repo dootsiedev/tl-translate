@@ -2,13 +2,9 @@
 
 #include "core/global.h"
 
-// NOTE: I could clean this up so that I don't include this.
-#include "translate.h"
 
 #include <vector>
 
-#ifdef TL_COMPILE_TIME_TRANSLATION
-// don't define this in headers, the path is relative to where you #include
 
 #define TL_START(lang, ...) lang,
 #include "../translations/tl_begin_macro.txt"
@@ -18,9 +14,7 @@ enum class TL_LANG{
 };
 #include "../translations/tl_end_macro.txt"
 
-const char* get_lang_string(TL_LANG lang);
-std::vector<TL_LANG> get_supported_languages();
-#else
+#ifndef TL_COMPILE_TIME_TRANSLATION
 #include "translation_parser.h"
 #include <map>
 #endif // TL_COMPILE_TIME_TRANSLATION
@@ -32,11 +26,8 @@ struct translation_context
 #endif
 {
 #ifdef TL_COMPILE_TIME_TRANSLATION
-	// TODO: should be a cvar
 	TL_LANG current_lang = TL_LANG::English;
 #else // TL_COMPILE_TIME_TRANSLATION
-
-	// TODO: this should be a cvar
 
 	// -1 = no language loaded (english)
 	int current_lang = -1;
@@ -59,6 +50,8 @@ struct translation_context
 	// NOTE: would a fs::path be any faster?
 	std::string loading_path;
 
+	void load_index(uint16_t index, std::string_view value);
+
 	const char* on_header(tl_header_tuple& header) override;
 	const char* on_info(tl_info_tuple& header) override;
 	const char* on_translation(std::string&& key, std::string&& value) override;
@@ -77,6 +70,10 @@ struct translation_context
 	// you probably need to use something different for better compile times (enums).
 	std::vector<uint16_t> translations;
 
+	// to compare with the compile time number of translations,
+	// so I don't need to loop through the vector for unloaded translations.
+	size_t num_loaded_translations = 0;
+
 #ifdef TL_PERFECT_HASH_TRANSLATION
 	const char* get_hashed_text(const char* text, translate_hash_type hash);
 #else
@@ -89,4 +86,4 @@ struct translation_context
 	NDSERR bool init();
 };
 
-extern translation_context g_translation_context;
+translation_context &get_translation_context();

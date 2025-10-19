@@ -1,5 +1,38 @@
 #pragma once
 
+// I hash the translation files to check if the files loaded during runtime match during compilation.
+#ifdef TL_USE_64bit_HASH
+constexpr uint64_t val_64_const = 0xcbf29ce484222325;
+constexpr uint64_t prime_64_const = 0x100000001b3;
+#ifdef __clang__
+__attribute__((no_sanitize("unsigned-integer-overflow")))
+#endif
+constexpr std::uint64_t hash_fnv1a_const2(const char* str, std::uint64_t value = val_64_const) noexcept
+{
+	for(; *str != '\0'; ++str)
+	{
+		value = (value ^ static_cast<std::uint64_t>(static_cast<uint8_t>(*str))) * prime_64_const;
+	}
+	return value;
+}
+typedef uint64_t translate_hash_type;
+#else
+constexpr uint32_t val_32_const = 0x811c9dc5;
+constexpr uint32_t prime_32_const = 0x1000193;
+#ifdef __clang__
+__attribute__((no_sanitize("unsigned-integer-overflow")))
+#endif
+constexpr std::uint32_t hash_fnv1a_const2(const char* str, std::uint32_t value = val_32_const) noexcept
+{
+	for(; *str != '\0'; ++str)
+	{
+		value = (value ^ static_cast<std::uint32_t>(static_cast<uint8_t>(*str))) * prime_32_const;
+	}
+	return value;
+}
+typedef uint32_t translate_hash_type;
+#endif
+
 #ifndef TL_PERFECT_HASH_TRANSLATION
 
 // simple gettext style translation done during runtime.
@@ -14,37 +47,11 @@ const char* translate_gettext(const char* text);
 #ifdef TL_COMPILE_TIME_ASSERTS
 #include "translate_get_index.h"
 // abusing lambda to use static_assert in an expression
-#define _T(x) translate_gettext(([] { static_assert(get_text_index(x) != 0, "translation not found"); }, x))
+#define _T(x) ([] { static_assert(get_text_index(x) != 0, "translation not found"); },translate_gettext(x))
 #else
 #define _T(x) translate_gettext(x)
 #endif // TL_COMPILE_TIME_ASSERTS
 #else // TL_PERFECT_HASH_TRANSLATION
-
-#ifdef TL_USE_64bit_HASH
-constexpr uint64_t val_64_const = 0xcbf29ce484222325;
-constexpr uint64_t prime_64_const = 0x100000001b3;
-constexpr std::uint64_t hash_fnv1a_const2(const char* str, std::uint64_t value = val_64_const) noexcept
-{
-	for(; *str != '\0'; ++str)
-	{
-		value = (value ^ static_cast<std::uint64_t>(static_cast<uint8_t>(*str))) * prime_64_const;
-	}
-	return value;
-}
-typedef uint64_t translate_hash_type;
-#else
-constexpr uint32_t val_32_const = 0x811c9dc5;
-constexpr uint32_t prime_32_const = 0x1000193;
-constexpr std::uint32_t hash_fnv1a_const2(const char* str, std::uint32_t value = val_32_const) noexcept
-{
-	for(; *str != '\0'; ++str)
-	{
-		value = (value ^ static_cast<std::uint32_t>(static_cast<uint8_t>(*str))) * prime_32_const;
-	}
-	return value;
-}
-typedef uint32_t translate_hash_type;
-#endif
 
 inline constexpr uint16_t const_get_hash(translate_hash_type hash)
 {
