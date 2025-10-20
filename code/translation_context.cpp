@@ -112,6 +112,7 @@ bool translation_context::init()
 #include <filesystem>
 
 #include "3rdParty/fnv1a_hash.h"
+#include "escape_string.h"
 
 
 // translations in a file
@@ -175,13 +176,19 @@ bool translation_context::init()
 {
 	// reset back to english (init() can be called again to load a new language).
 	current_lang = -1;
-	// fastpath, if english, skip everything and only use english.
+
+	num_loaded_translations = 0;
+	translations.clear();
+	translation_memory.clear();
+
 #ifdef NDEBUG
+	// fastpath, if english, skip everything and only use english.
 	if(cv_language.data() == get_lang_short_name(TL_LANG::English) || cv_language.data() == get_lang_long_name(TL_LANG::English))
 	{
 		return true;
 	}
 #endif
+
 	const char* folder_to_translations = "translations";
 	if(!load_languages(folder_to_translations))
 	{
@@ -195,26 +202,22 @@ bool translation_context::init()
 
 	check_languages();
 
-	parse_headers = false;
-
-	// TODO: move this into a function
-	translations.clear();
-	// index 0 must be an error.
-	translations.resize(get_number_of_translations() + 1);
-	num_loaded_translations = 0;
-	translation_memory.clear();
-	// this is an estimate.
-	translation_memory.reserve(get_translation_memory_size() * 2);
-	// what to show on the error index.
-	std::string error_string = "<error string>\n";
-	translation_memory.insert(translation_memory.end(), error_string.begin(), error_string.end());
-	translation_memory.push_back('\0');
-
 	slogf("Languages Available:\n");
 	for(auto& lang : language_list)
 	{
 		slogf("- %s (%s)\n", lang.long_name.c_str(), lang.short_name.c_str());
 	}
+
+	// setup
+	// index 0 must be an error.
+	translations.resize(get_number_of_translations() + 1);
+
+	// this is an estimate.
+	translation_memory.reserve(get_translation_memory_size() * 2);
+	// what to show on the error index.
+	constexpr std::string_view error_string = "<error string>\n";
+	translation_memory.insert(translation_memory.end(), error_string.begin(), error_string.end());
+	translation_memory.push_back('\0');
 
 	int lang_index = 0;
 	for(auto& lang: language_list)
@@ -227,12 +230,14 @@ bool translation_context::init()
 		slogf("Using Language: %s\n", lang.long_name.c_str());
 
 		// english stays -1 because it's faster.
+		// I could try to check if english has ANY overridden translations, but why?
 		if(lang.short_name != get_lang_short_name(TL_LANG::English))
 		{
 			current_lang = lang_index;
 		}
 		else
 		{
+			// english
 			ASSERT(current_lang == -1 && "this should be been set at the start of the function");
 		}
 
@@ -369,8 +374,11 @@ void translation_context::check_languages()
 		}
 	}
 }
+
 bool translation_context::load_language(language_entry& lang)
 {
+	parse_headers = false;
+
 	slurp_string.clear();
 	// copy the file into the string
 	if(!slurp_stdio(slurp_string, lang.translation_file.c_str()))
@@ -417,10 +425,8 @@ bool translation_context::load_language(language_entry& lang)
 			{
 				auto index = std::distance(translations.begin(), it);
 				++found_count;
-				std::string key = get_index_key(index);
-				// TODO: every time I print a key or value, I should convert escape codes
-				if(key.back() == '\n') key.pop_back();
-				slogf("- `%s`\n", key.c_str());
+				const char* key = get_index_key(index);
+				slogf("- \"%s\"\n", escape_string(key).c_str());
 				load_index(index, key);
 			}
 		}

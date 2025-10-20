@@ -485,6 +485,7 @@ add_executable(${PROJECT_NAME}
 		code/translation_context.cpp
 		code/translation_parser.h
 		code/translation_parser.cpp
+        code/escape_string.h
 
         code/core/global_pch.h
         code/core/global.h
