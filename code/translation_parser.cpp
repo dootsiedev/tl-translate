@@ -118,48 +118,69 @@ static_assert(std::is_aggregate_v<std::decay_t<tl_root&>>);
 namespace bp = boost::parser;
 namespace tl_parser
 {
+	template<class T>
+	class report_wrapper : public tl_parse_state
+	{
+	public:
+		T& context;
+		explicit report_wrapper(T& context_) : context(context_){}
+		void report_error(const char* msg) override
+		{
+			bp::_report_error(context, msg);
+		}
+		void report_warning(const char* msg) override
+		{
+			bp::_report_error(context, msg);
+		}
+	};
+
 using namespace bp::literals;
 
 auto const header_action = [](auto& ctx) {
 	auto & globals = bp::_globals(ctx);
 	tl_header_tuple& info = bp::_attr(ctx);
-	// TODO: warnings? _pass?
-	const char* msg = globals.on_header(info);
-	if(msg != nullptr)
+
+	report_wrapper wrap(ctx);
+	globals.tl_parser_ctx = &wrap;
+
+	switch(globals.on_header(info))
 	{
-		std::string str = "<on_header>: ";
-		str += msg;
-		bp::_report_error(ctx, str);
-		//bp::_pass(ctx) = false;
+	case TL_RESULT::SUCCESS: break;
+	case TL_RESULT::WARNING: break;
+	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
+	globals.tl_parser_ctx = nullptr;
 };
 auto const key_action = [](auto& ctx) {
 	auto & globals = bp::_globals(ctx);
 	auto& info = bp::_attr(ctx);
 
-	const char* msg = globals.on_translation(std::move(std::get<0>(info)), std::move(std::get<1>(info)));
-	if(msg != nullptr)
+	report_wrapper wrap(ctx);
+	globals.tl_parser_ctx = &wrap;
+
+	switch(globals.on_translation(std::get<0>(info), std::get<1>(info)))
 	{
-		// I assume I don't need to print the key and value, because parser will print it for me.
-		std::string str = "<on_translation>: ";
-		str += msg;
-		//str_asprintf(str, "<on_translation>: %s", std::get<0>(info).c_str(), std::get<1>(info).c_str(), msg);
-		bp::_report_error(ctx, str);
-		//bp::_pass(ctx) = false;
+	case TL_RESULT::SUCCESS: break;
+	case TL_RESULT::WARNING: break;
+	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
+	globals.tl_parser_ctx = nullptr;
 };
 
 auto const info_action = [](auto& ctx) {
 	auto & globals = bp::_globals(ctx);
 	tl_info_tuple& info = bp::_attr(ctx);
-	const char* msg = globals.on_info(info);
-	if(msg != nullptr)
+
+	report_wrapper wrap(ctx);
+	globals.tl_parser_ctx = &wrap;
+
+	switch(globals.on_info(info))
 	{
-		std::string str = "<on_info>: ";
-		str += msg;
-		bp::_report_error(ctx, str);
-		//bp::_pass(ctx) = false;
+	case TL_RESULT::SUCCESS: break;
+	case TL_RESULT::WARNING: break;
+	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
+	globals.tl_parser_ctx = nullptr;
 };
 
 bp::rule<class header_lang, tl_header_tuple> const header_lang =

@@ -344,9 +344,9 @@ Unique_RWops Unique_RWops_FromFP(FILE* fp, std::string name)
 }
 
 // convenience function to copy to a string.
-bool slurp_stdio(std::string& out, const char* path, const char* mode)
+bool slurp_stdio(std::string& out, const char* path)
 {
-	FILE* file = serr_wrapper_fopen(path, mode);
+	FILE* file = serr_wrapper_fopen(path, "rb");
 	if(file == nullptr)
 	{
 		return false;

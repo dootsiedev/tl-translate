@@ -136,7 +136,7 @@ static constexpr const char* get_index_key(uint16_t find_index)
 }
 
 // This only gets the english memory size, which I use as an OK estimate.
-static constexpr int get_translation_memory_size()
+static constexpr uint16_t get_translation_memory_size()
 {
 	// index 0 is uninitialized.
 	uint16_t size = 1;
@@ -150,14 +150,18 @@ static constexpr int get_translation_memory_size()
 const char* translation_context::get_text(const char* text)
 {
 	ASSERT(text != NULL);
+
+	// if this is english or an error occurred.
 	if(current_lang == -1)
 	{
-		// unloaded.
 		return text;
 	}
-	// index 0 is uninitialized.
 	auto index = get_text_index(text);
 	ASSERT_M(index != 0 && "translation not found", text);
+	ASSERT(!memory.empty());
+	ASSERT(!translations.empty());
+	ASSERT(index <= translations.size());
+	ASSERT(translations[index] <= memory.size());
 	return &memory[translations[index]];
 }
 bool translation_context::init()
@@ -379,7 +383,7 @@ bool translation_context::init()
 				// the error offset
 				if(*it == 0)
 				{
-					uint16_t index = std::distance(translations.begin(), it);
+					auto index = std::distance(translations.begin(), it);
 					++found_count;
 					std::string key = get_index_key(index);
 					// TODO: every time I print a key or value, I should convert escape codes
@@ -401,7 +405,17 @@ bool translation_context::init()
 	return false;
 }
 
-const char* translation_context::on_header(tl_header_tuple& header)
+
+void translation_context::on_error(const char* msg)
+{
+	slog(msg);
+}
+void translation_context::on_warning(const char* msg)
+{
+	serr(msg);
+}
+
+TL_RESULT translation_context::on_header(tl_header_tuple& header)
 {
 #ifdef TL_PRINT_FILE
 	slogf(
@@ -417,40 +431,44 @@ const char* translation_context::on_header(tl_header_tuple& header)
 	{
 		// I should use emplace_back and designated initializers, but I use C++17.
 		language_entry entry;
-		entry.long_name = std::get<tl_header_get::long_name>(header);
-		entry.short_name = std::get<tl_header_get::short_name>(header);
-		entry.native_name = std::get<tl_header_get::native_name>(header);
+		entry.long_name = std::get<(int)tl_header_get::long_name>(header);
+		entry.short_name = std::get<(int)tl_header_get::short_name>(header);
+		entry.native_name = std::get<(int)tl_header_get::native_name>(header);
 		// I am tempted to move this in, but this string is being used by the parser...
 		entry.translation_file = loading_path;
 		language_list.push_back(std::move(entry));
-		return nullptr;
+		return TL_RESULT::SUCCESS;
 	}
 #ifndef NDEBUG
 	// make sure we are using the right language.
-	std::string& found_short = std::get<tl_header_get::short_name>(header);
+	std::string& found_short = std::get<(int)tl_header_get::short_name>(header);
 	if(current_lang == -1)
 	{
 		if(found_short != get_lang_short_name(TL_LANG::English))
 		{
-			slogf("expected english (got: %s)\n", found_short.c_str());
-			return "expected english";
+			std::string msg;
+			str_asprintf(msg, "expected english (got: %s)\n", found_short.c_str());
+			tl_parser_ctx->report_error(msg.c_str());
+			return TL_RESULT::FAILURE;
 		}
-		return nullptr;
+		return TL_RESULT::SUCCESS;
 	}
 	ASSERT(current_lang < language_list.size());
 	std::string& expected = language_list[current_lang].short_name;
 	if(expected != found_short)
 	{
 		// I should print the file location as well, too lazy.
-		slogf("unexpected language (expected: %s, got: %s)\n", expected.c_str(), found_short.c_str());
-		return "unexpected language";
+		std::string msg;
+		str_asprintf(msg, "unexpected language (expected: %s, got: %s)\n", expected.c_str(), found_short.c_str());
+		tl_parser_ctx->report_error(msg.c_str());
+		return TL_RESULT::FAILURE;
 	}
 #endif
 
-	return nullptr;
+	return TL_RESULT::SUCCESS;
 }
 // should be optional, but I like printing.
-const char* translation_context::on_info(tl_info_tuple& info)
+TL_RESULT translation_context::on_info(tl_info_tuple& info)
 {
 #ifdef TL_PRINT_FILE
 	slogf(
@@ -461,7 +479,7 @@ const char* translation_context::on_info(tl_info_tuple& info)
 		std::get<tl_info_get::function>(info).c_str(),
 		std::get<tl_info_get::line>(info));
 #endif
-	return nullptr;
+	return TL_RESULT::SUCCESS;
 }
 void translation_context::load_index(uint16_t index, std::string_view value)
 {
@@ -479,7 +497,7 @@ void translation_context::load_index(uint16_t index, std::string_view value)
 
 	ASSERT(num_loaded_translations <= translations.size());
 }
-const char* translation_context::on_translation(std::string&& key, std::string&& value)
+TL_RESULT translation_context::on_translation(std::string& key, std::string& value)
 {
 #ifdef TL_PRINT_FILE
 	if(!key.empty() && key.back() == '\n')
@@ -502,21 +520,23 @@ const char* translation_context::on_translation(std::string&& key, std::string&&
 #endif
 	if(parse_headers)
 	{
-		return nullptr;
+		return TL_RESULT::SUCCESS;
 	}
 
 	// this is using compile time strings.
-	uint16_t index = get_text_index(key);
+	auto index = get_text_index(key);
 	if(index == 0)
 	{
 		// TODO: make tl-string extractor add UNRESOLVED, and ignore it?
-		return "text does not exist";
+		tl_parser_ctx->report_warning("text does not exist");
+		return TL_RESULT::WARNING;
 	}
 	ASSERT(index < translations.size());
 	if(translations[index] != 0)
 	{
 		load_index(index, key);
-		return "duplicate entry";
+		tl_parser_ctx->report_warning("duplicate entry");
+		return TL_RESULT::WARNING;
 	}
 
 	// this is a hack because my parser will accept NULL as a string.
@@ -528,15 +548,15 @@ const char* translation_context::on_translation(std::string&& key, std::string&&
 		// ignore english, there is no translation.
 		if(current_lang != -1)
 		{
-			// TODO: only show a dialog if parser fails, and callbacks as a warning?
-			return "untranslated";
+			tl_parser_ctx->report_warning("untranslated");
+			return TL_RESULT::WARNING;
 		}
-		return nullptr;
+		return TL_RESULT::SUCCESS;
 	}
 
 	load_index(index, value);
 
-	return nullptr;
+	return TL_RESULT::SUCCESS;
 }
 
 #endif // TL_COMPILE_TIME_TRANSLATION

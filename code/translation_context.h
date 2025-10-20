@@ -52,9 +52,12 @@ struct translation_context
 
 	void load_index(uint16_t index, std::string_view value);
 
-	const char* on_header(tl_header_tuple& header) override;
-	const char* on_info(tl_info_tuple& header) override;
-	const char* on_translation(std::string&& key, std::string&& value) override;
+	void on_error(const char* msg) override;
+	void on_warning(const char* msg) override;
+
+	TL_RESULT on_header(tl_header_tuple& header) override;
+	TL_RESULT on_info(tl_info_tuple& header) override;
+	TL_RESULT on_translation(std::string& key, std::string& value) override;
 
 	std::vector<language_entry> language_list;
 
