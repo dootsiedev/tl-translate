@@ -111,6 +111,8 @@ bool translation_context::init()
 // I would have used SDL because I don't want to use a library I don't need to use...
 #include <filesystem>
 
+#include "3rdParty/fnv1a_hash.h"
+
 
 // translations in a file
 static constexpr tl_index get_number_of_translations()

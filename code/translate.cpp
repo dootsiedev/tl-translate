@@ -6,7 +6,8 @@
 static_assert(L'☃' == L'\x2603', "File encoding appears not to be UTF-8");
 
 #ifdef TL_COMPILE_TIME_ASSERTS
-// you should compile this file at the end of the cmake lists so that english translations are done first.
+// you should compile this file at the end of the cmake lists
+// so that english static asserts are done first before the other languages
 static_assert([] {
 #define TL(key, value) static_assert(get_text_index(key) != 0, "translation not found");
 #include "../translations/tl_begin_macro.txt"

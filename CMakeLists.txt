@@ -484,6 +484,10 @@ add_executable(${PROJECT_NAME}
         code/main.cpp
 
 		code/translate.h
+        # I should put translate.cpp as far down this list as possible
+        # because it will check if every language has the same translation as the reference.
+        # but you should first fix your non-existing string asserts before that
+        # I wonder if there is a custom cmake rule to only build AFTER other files.
 		code/translate.cpp
 		code/translation_context.h
 		code/translation_context.cpp
@@ -504,6 +508,8 @@ add_executable(${PROJECT_NAME}
         code/core/assert.h
         code/core/assert.cpp
         code/core/breakpoint.h
+
+        code/3rdParty/fnv1a_hash.h
 
         code/datastructures/BS_stream.h
         code/datastructures/BS_stream.cpp
