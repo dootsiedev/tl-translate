@@ -65,56 +65,6 @@
 
 #include <sstream>
 
-
-// if I used boost hana, I could use a struct.
-// but no, I just include boost parser as include manually.
-#if 0
-struct tl_header
-{
-	std::string long_name;
-	std::string short_name;
-	std::string date;
-	std::string git_hash;
-};
-
-struct tl_translation
-{
-	std::string key;
-	std::string value;
-};
-
-struct tl_info
-{
-	std::string source_file;
-	std::string function;
-	int line;
-};
-
-struct tl_unresolved
-{
-	std::string date;
-	std::string git_hash;
-};
-struct tl_maybe
-{
-	std::string original_key;
-	std::string source_file;
-	std::string function;
-	int line;
-	std::string date;
-	std::string git_hash;
-};
-
-typedef std::variant<tl_translation> tl_functions;
-
-struct tl_root
-{
-	tl_header header;
-	//std::vector<tl_functions> functions;
-};
-static_assert(std::is_aggregate_v<std::decay_t<tl_root&>>);
-#endif
-
 namespace bp = boost::parser;
 namespace tl_parser
 {
@@ -130,7 +80,7 @@ namespace tl_parser
 		}
 		void report_warning(const char* msg) override
 		{
-			bp::_report_error(context, msg);
+			bp::_report_warning(context, msg);
 		}
 	};
 
@@ -279,8 +229,8 @@ BOOST_PARSER_DEFINE_RULES(
 
 struct logging_error_handler
 {
-	explicit logging_error_handler(std::string_view filename)
-	: filename_(filename)
+	explicit logging_error_handler(tl_parse_observer& o_, std::string_view filename)
+	: o(o_), filename_(filename)
 	{
 	}
 
@@ -296,11 +246,11 @@ struct logging_error_handler
 	bp::error_handler_result
 		operator()(Iter first, Sentinel last, bp::parse_error<Iter> const& e) const
 	{
+		errors_printed = true;
 		std::ostringstream oss;
 		// NOLINTNEXTLINE(performance-unnecessary-value-param)
 		bp::write_formatted_expectation_failure_error_message(oss, filename_, first, last, e);
-		// TODO: move this into the observer?
-		slog(oss.str().c_str());
+		o.on_error(oss.str().c_str());
 		return bp::error_handler_result::fail;
 	}
 
@@ -313,7 +263,11 @@ struct logging_error_handler
 		std::ostringstream oss;
 		bp::write_formatted_message(
 			oss, filename_, bp::_begin(context), it, bp::_end(context), message);
-		slog(oss.str().c_str());
+		switch(kind)
+		{
+		case bp::diagnostic_kind::error: o.on_error(oss.str().c_str()); errors_printed = true; break;
+		case bp::diagnostic_kind::warning: o.on_warning(oss.str().c_str()); break;
+		}
 	}
 
 	// This is just like the other overload of diagnose(), except that it
@@ -325,26 +279,41 @@ struct logging_error_handler
 		diagnose(kind, message, context, bp::_where(context).begin());
 	}
 
+	mutable bool errors_printed = false;
+	tl_parse_observer& o;
 	std::string_view filename_;
 };
 
 } // namespace tl_parser
 
-bool parse_translation_file(parse_observer& o, std::string_view file_contents, std::string_view path_name)
+bool parse_translation_file(
+	tl_parse_observer& o, std::string_view file_contents, std::string_view path_name)
 {
-	tl_parser::logging_error_handler err(path_name);
+	tl_parser::logging_error_handler err(o,path_name);
 
-	auto const parse = bp::with_error_handler(bp::with_globals(tl_parser::root_p_def, o), err);
+	auto const parse = bp::with_error_handler(bp::with_globals(tl_parser::root_p, o), err);
 
-	// TODO: cvar for tracing?
-	bool const success = bp::parse(file_contents, parse, tl_parser::skipper); //, bp::trace::on);
-	if(!success)
+	auto it = file_contents.begin();
+	// NOTE: I could enable tracing, but it generates thousands of lines, bp::trace::on);
+	if(!bp::prefix_parse(it, file_contents.end(), parse, tl_parser::skipper))
 	{
-		// TODO: print more info if no error message is printed.
-		//  put the error message into a string?
-		serrf("error\n");
+		// it's really stupid that parse wont print an error if nothing is parsed at the start.
+		// but at least this works as expected.
+		if(!parse.error_handler_.errors_printed)
+		{
+			std::ostringstream oss;
+			bp::write_formatted_message(
+				oss,
+				path_name,
+				file_contents.begin(),
+				it,
+				file_contents.end(),
+				"expected TL_START");
+			o.on_error(oss.str().c_str());
+		}
+		return false;
 	}
-	return success;
+	return true;
 }
 
 #endif // TL_COMPILE_TIME_TRANSLATION

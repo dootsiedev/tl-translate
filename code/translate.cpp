@@ -14,8 +14,36 @@ static_assert([] {
 #include "../translations/tl_end_macro.txt"
 	return true;
 }());
-#endif
 
+
+const char* translate_gettext(const char* text, tl_index index)
+{
+	// should be 2 fast lookups.
+	// I could inline/constexpr this function, and it would get rid of the lambda hack,
+	// but I doubt there would be any useful performance gain.
+#ifdef TL_COMPILE_TIME_TRANSLATION
+	switch(get_translation_context().current_lang)
+	{
+#define TL_START(lang, ...)          \
+	case TL_LANG::lang:              \
+		switch(index) \
+		{
+#define TL(x, y) case get_text_index(x): return (y != nullptr) ? y : text;
+#define TL_END() \
+	}            \
+	break;
+#include "../translations/tl_begin_macro.txt"
+#include "../translations/english_ref.inl"
+#include "../translations/tl_all_languages.txt"
+#include "../translations/tl_end_macro.txt"
+	}
+	ASSERT_M("translation not found", text);
+	return text;
+#else
+	return get_translation_context().get_text(text, index);
+#endif
+}
+#else
 const char* translate_gettext(const char* text)
 {
 #ifdef TL_COMPILE_TIME_TRANSLATION
@@ -36,23 +64,4 @@ const char* translate_gettext(const char* text)
 	return get_translation_context().get_text(text);
 #endif
 }
-
-#ifdef TL_PERFECT_HASH_TRANSLATION
-const char* translate_hash(const char* text, translate_hash_type hash)
-{
-#ifdef TL_COMPILE_TIME_TRANSLATION
-	switch(g_translation_context.get_lang())
-	{
-	case TL_LANG::ENGLISH: return text;
-#undef TL
-#define TL(x, y) \
-	if(x == hash) return (y != nullptr) ? y : text;
-#include "../translations/all_languages.txt"
-	}
-	print_missing_translation(text, false);
-	return text;
-#else
-	return g_translation_context.get_hashed_text(text, hash);
-#endif // TL_COMPILE_TIME_TRANSLATION
-}
-#endif // TL_PERFECT_HASH_TRANSLATION
+#endif

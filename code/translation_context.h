@@ -2,6 +2,8 @@
 
 #include "core/global.h"
 
+#define TL_IMPLEMENT_GET_INDEX 1
+#include "translate.h"
 
 #include <vector>
 
@@ -22,7 +24,7 @@ enum class TL_LANG{
 
 struct translation_context
 #ifndef TL_COMPILE_TIME_TRANSLATION
-: public parse_observer
+: public tl_parse_observer
 #endif
 {
 #ifdef TL_COMPILE_TIME_TRANSLATION
@@ -50,13 +52,12 @@ struct translation_context
 	// NOTE: would a fs::path be any faster?
 	std::string loading_path;
 
-	void load_index(uint16_t index, std::string_view value);
+	void load_index(tl_index index, std::string_view value);
 
 	void on_error(const char* msg) override;
 	void on_warning(const char* msg) override;
 
 	TL_RESULT on_header(tl_header_tuple& header) override;
-	TL_RESULT on_info(tl_info_tuple& header) override;
 	TL_RESULT on_translation(std::string& key, std::string& value) override;
 
 	std::vector<language_entry> language_list;
@@ -69,16 +70,15 @@ struct translation_context
 	// I lookup a string based off english_ref.inl
 	// so the ID is ordered based on the location the string is in the english_ref.inl
 	// this contains the offset inside of memory.
-	// uint16_t might be small, but if you had more than 65k letters,
-	// you probably need to use something different for better compile times (enums).
-	std::vector<uint16_t> translations;
+
+	std::vector<tl_index> translations;
 
 	// to compare with the compile time number of translations,
 	// so I don't need to loop through the vector for unloaded translations.
 	size_t num_loaded_translations = 0;
 
-#ifdef TL_PERFECT_HASH_TRANSLATION
-	const char* get_hashed_text(const char* text, translate_hash_type hash);
+#ifdef TL_COMPILE_TIME_ASSERTS
+	const char* get_text(const char* text, tl_index index);
 #else
 	const char* get_text(const char* text);
 #endif

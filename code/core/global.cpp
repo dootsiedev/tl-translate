@@ -243,7 +243,7 @@ static MY_NOINLINE void serr_safe_stacktrace(int skip)
 	if(cv_serr_bt.data() == 2 || (cv_serr_bt.data() == 1 && !serr_check_error()))
 	{
 		std::string msg;
-		str_asprintf(msg, "StackTrace (%s = %d)\n", cv_serr_bt.cvar_key, cv_serr_bt.data());
+		str_asprintf(msg, "StackTrace (%s = %d): \n", cv_serr_bt.cvar_key, cv_serr_bt.data());
 		debug_stacktrace_string_printer handler(msg);
 		debug_stacktrace(handler, skip + 1);
 		msg += '\n';

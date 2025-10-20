@@ -111,12 +111,11 @@ bool translation_context::init()
 // I would have used SDL because I don't want to use a library I don't need to use...
 #include <filesystem>
 
-#include "translate.h"
 
 // translations in a file
-static constexpr uint16_t get_number_of_translations()
+static constexpr tl_index get_number_of_translations()
 {
-	uint16_t index = 0;
+	tl_index index = 0;
 #define TL(key, value) index++;
 #include "../translations/tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
@@ -124,10 +123,10 @@ static constexpr uint16_t get_number_of_translations()
 	return index;
 }
 // used as a fallback to fix missing translations during runtime.
-static constexpr const char* get_index_key(uint16_t find_index)
+static constexpr const char* get_index_key(tl_index find_index)
 {
 	// index 0 is uninitialized.
-	uint16_t index = 1;
+	tl_index index = 1;
 #define TL(key, _) if(find_index == index) {return key;} index++;
 #include "../translations/tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
@@ -136,10 +135,10 @@ static constexpr const char* get_index_key(uint16_t find_index)
 }
 
 // This only gets the english memory size, which I use as an OK estimate.
-static constexpr uint16_t get_translation_memory_size()
+static constexpr tl_index get_translation_memory_size()
 {
 	// index 0 is uninitialized.
-	uint16_t size = 1;
+	tl_index size = 1;
 #define TL(key, value) size += std::string_view(key).size() + 1;
 #include "../translations/tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
@@ -147,7 +146,11 @@ static constexpr uint16_t get_translation_memory_size()
 	return size;
 }
 
+#ifdef TL_COMPILE_TIME_ASSERTS
+const char* translation_context::get_text(const char* text, tl_index index)
+#else
 const char* translation_context::get_text(const char* text)
+#endif
 {
 	ASSERT(text != NULL);
 
@@ -156,7 +159,9 @@ const char* translation_context::get_text(const char* text)
 	{
 		return text;
 	}
+#ifndef TL_COMPILE_TIME_ASSERTS
 	auto index = get_text_index(text);
+#endif
 	ASSERT_M(index != 0 && "translation not found", text);
 	ASSERT(!memory.empty());
 	ASSERT(!translations.empty());
@@ -467,23 +472,10 @@ TL_RESULT translation_context::on_header(tl_header_tuple& header)
 
 	return TL_RESULT::SUCCESS;
 }
-// should be optional, but I like printing.
-TL_RESULT translation_context::on_info(tl_info_tuple& info)
+
+void translation_context::load_index(tl_index index, std::string_view value)
 {
-#ifdef TL_PRINT_FILE
-	slogf(
-		"file: %s\n"
-		"function: %s\n"
-		"line: %d\n",
-		std::get<tl_info_get::source_file>(info).c_str(),
-		std::get<tl_info_get::function>(info).c_str(),
-		std::get<tl_info_get::line>(info));
-#endif
-	return TL_RESULT::SUCCESS;
-}
-void translation_context::load_index(uint16_t index, std::string_view value)
-{
-	uint16_t offset = memory.size();
+	tl_index offset = memory.size();
 
 	memory.insert(memory.end(), value.begin(), value.end());
 
