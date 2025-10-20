@@ -289,9 +289,10 @@ bool debug_stacktrace_string_printer::print_line(debug_stacktrace_info* data)
 	{
 		str_asprintf(str, "%" PRIxPTR, data->addr);
 	}
+
 	if(data->file != NULL)
 	{
-		str_asprintf(str, " [%s @ %d]\n", data->file, data->line);
+		str_asprintf(str, " [%s:%d]\n", data->file, data->line);
 	}
 	else
 	{

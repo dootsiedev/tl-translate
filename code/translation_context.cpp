@@ -163,11 +163,11 @@ const char* translation_context::get_text(const char* text)
 	auto index = get_text_index(text);
 #endif
 	ASSERT_M(index != 0 && "translation not found", text);
-	ASSERT(!memory.empty());
+	ASSERT(!translation_memory.empty());
 	ASSERT(!translations.empty());
 	ASSERT(index <= translations.size());
-	ASSERT(translations[index] <= memory.size());
-	return &memory[translations[index]];
+	ASSERT(translations[index] <= translation_memory.size());
+	return &translation_memory[translations[index]];
 }
 bool translation_context::init()
 {
@@ -180,8 +180,72 @@ bool translation_context::init()
 		return true;
 	}
 #endif
+	const char* folder_to_translations = "translations";
+	if(!load_languages(folder_to_translations))
+	{
+		return false;
+	}
+	if(language_list.empty())
+	{
+		slogf("info: found no translations: %s\n", folder_to_translations);
+		return true;
+	}
+
+	check_languages();
+
+	parse_headers = false;
+
+	// TODO: move this into a function
+	translations.clear();
+	// index 0 must be an error.
+	translations.resize(get_number_of_translations() + 1);
+	num_loaded_translations = 0;
+	translation_memory.clear();
+	// this is an estimate.
+	translation_memory.reserve(get_translation_memory_size() * 2);
+	// what to show on the error index.
+	std::string error_string = "<error string>\n";
+	translation_memory.insert(translation_memory.end(), error_string.begin(), error_string.end());
+	translation_memory.push_back('\0');
+
+	slogf("Languages Available:\n");
+	for(auto& lang : language_list)
+	{
+		slogf("- %s (%s)\n", lang.long_name.c_str(), lang.short_name.c_str());
+	}
+
+	int lang_index = 0;
+	for(auto& lang: language_list)
+	{
+		if(lang.long_name != *cv_language && lang.short_name != *cv_language)
+		{
+			lang_index++;
+			continue;
+		}
+		slogf("Using Language: %s\n", lang.long_name.c_str());
+
+		// english stays -1 because it's faster.
+		if(lang.short_name != get_lang_short_name(TL_LANG::English))
+		{
+			current_lang = lang_index;
+		}
+		else
+		{
+			ASSERT(current_lang == -1 && "this should be been set at the start of the function");
+		}
+
+		return load_language(lang);
+	}
+	serrf("Failed to find language (%s = %s)\n", cv_language.cvar_key, cv_language->c_str());
+
+	return false;
+}
+
+bool translation_context::load_languages(const char* folder)
+{
+	language_list.clear();
 	parse_headers = true;
-	std::filesystem::path translations_path("translations");
+	std::filesystem::path translations_path(folder);
 	if(!std::filesystem::exists(translations_path))
 	{
 		serrf("no translation folder: %s\n", translations_path.string().c_str());
@@ -192,7 +256,6 @@ bool translation_context::init()
 		serrf("not a translation folder: %s\n", translations_path.string().c_str());
 		return false;
 	}
-	std::string slurp_string;
 	for(const auto& dir_entry : std::filesystem::directory_iterator{translations_path})
 	{
 		if(std::filesystem::is_regular_file(dir_entry) && dir_entry.path().extension() == ".inl")
@@ -207,7 +270,7 @@ bool translation_context::init()
 			{
 				return false;
 			}
-#define CHECK_TIMER
+//#define CHECK_TIMER
 #ifdef CHECK_TIMER
 			// small file with like 1000 characters
 			// 0.2 - 0.05 ms on reldeb, 10ms on debug san.
@@ -230,7 +293,7 @@ bool translation_context::init()
 // but __has_embed works.
 // I could try to replace all_languages.inl to use #embed but I bet it wont respect macros.
 #if defined(__has_embed) && !defined(NDEBUG) // __cpp_pp_embed
-//#if __has_embed("../translations/english_ref.inl") != __STDC_EMBED_NOT_FOUND__
+			//#if __has_embed("../translations/english_ref.inl") != __STDC_EMBED_NOT_FOUND__
 			// check to see if the english ref matches the hash made during compilation.
 			// this seems to defeat the purpose of runtime translations,
 			// but I find it to annoying if I accidentally load the wrong translations.
@@ -255,12 +318,10 @@ bool translation_context::init()
 #endif // __has_embed
 		}
 	}
-	if(language_list.empty())
-	{
-		slogf("info: found no translations: %s\n", translations_path.string().c_str());
-		return true;
-	}
-
+	return true;
+}
+void translation_context::check_languages()
+{
 	// check if any languages are missing from the compile time enum.
 	for(int i = 0; i < get_language_count(); ++i)
 	{
@@ -284,7 +345,6 @@ bool translation_context::init()
 		}
 	}
 
-	// TODO: move this into a function
 	// check for duplicates.
 	for(auto it = language_list.begin(); it != language_list.end(); ++it)
 	{
@@ -306,118 +366,78 @@ bool translation_context::init()
 			}
 		}
 	}
-
-	parse_headers = false;
-
-	// TODO: move this into a function
-	translations.clear();
-	// index 0 must be an error.
-	translations.resize(get_number_of_translations() + 1);
-	num_loaded_translations = 0;
-	memory.clear();
-	// this is an estimate.
-	memory.reserve(get_translation_memory_size() * 2);
-	// what to show on the error index.
-	std::string error_string = "<error string>\n";
-	memory.insert(memory.end(), error_string.begin(), error_string.end());
-	memory.push_back('\0');
-
-	slogf("Languages Available:\n");
-	for(auto& lang : language_list)
+}
+bool translation_context::load_language(language_entry& lang)
+{
+	slurp_string.clear();
+	// copy the file into the string
+	if(!slurp_stdio(slurp_string, lang.translation_file.c_str()))
 	{
-		slogf("- %s (%s)\n", lang.long_name.c_str(), lang.short_name.c_str());
+		return false;
 	}
-
-	int lang_index = 0;
-	for(auto& lang: language_list)
+#ifdef CHECK_TIMER
+	// small file with like 1000 characters
+	// 0.2 - 0.05 ms on reldeb, 10ms on debug san.
+	TIMER_U t1 = timer_now();
+#endif
+	if(!parse_translation_file(*this, slurp_string, lang.translation_file))
 	{
-		if(lang.long_name != cv_language->c_str() && lang.short_name != cv_language->c_str())
-		{
-			lang_index++;
-			continue;
-		}
-		slogf("Using Language: %s\n", lang.long_name.c_str());
-
-		// english stays -1 because it's faster.
-		if(lang.short_name != get_lang_short_name(TL_LANG::English))
-		{
-			current_lang = lang_index;
-		}
-
-		slurp_string.clear();
-		// copy the file into the string
-		if(!slurp_stdio(slurp_string, lang.translation_file.c_str()))
-		{
-			return false;
-		}
+		// missing strings will turn into @, I would rather have english.
+		translations.clear();
+		num_loaded_translations = 0;
+		translation_memory.clear();
+		cv_language.cvar_revert_to_default();
+		return false;
+	}
 #ifdef CHECK_TIMER
-		// small file with like 1000 characters
-		// 0.2 - 0.05 ms on reldeb, 10ms on debug san.
-		TIMER_U t1 = timer_now();
+	TIMER_U t2 = timer_now();
+	slogf("time: %" TIMER_FMT "\n", timer_delta_ms(t1, t2));
 #endif
-		if(!parse_translation_file(*this, slurp_string, lang.translation_file))
+	if(!CHECK(num_loaded_translations <= get_number_of_translations()))
+	{
+		return false;
+	}
+	// check and fix missing translations.
+	if(num_loaded_translations != get_number_of_translations())
+	{
+		size_t missing_count = get_number_of_translations() - num_loaded_translations;
+		slogf("missing translations (%zu): %s\n", missing_count, lang.translation_file.c_str());
+		size_t found_count = 0;
+		for(auto it = translations.begin(); it != translations.end(); ++it)
 		{
-			// missing strings will turn into @, I would rather have english.
-			translations.clear();
-			num_loaded_translations = 0;
-			memory.clear();
-			cv_language.cvar_revert_to_default();
-			return false;
-		}
-#ifdef CHECK_TIMER
-		TIMER_U t2 = timer_now();
-		slogf("time: %" TIMER_FMT "\n", timer_delta_ms(t1, t2));
-#endif
-		if(!CHECK(num_loaded_translations <= get_number_of_translations()))
-		{
-			return false;
-		}
-		// check and fix missing translations.
-		if(num_loaded_translations != get_number_of_translations())
-		{
-			size_t missing_count = get_number_of_translations() - num_loaded_translations;
-			slogf("missing translations (%zu): %s\n", missing_count, lang.translation_file.c_str());
-			size_t found_count = 0;
-			for(auto it = translations.begin(); it != translations.end(); ++it)
+			// this is the error string placeholder
+			if(it == translations.begin())
 			{
-				// this is the error string placeholder
-				if(it == translations.begin())
-				{
-					continue;
-				}
-				// the error offset
-				if(*it == 0)
-				{
-					auto index = std::distance(translations.begin(), it);
-					++found_count;
-					std::string key = get_index_key(index);
-					// TODO: every time I print a key or value, I should convert escape codes
-					if(key.back() == '\n') key.pop_back();
-					slogf("- `%s`\n", key.c_str());
-					load_index(index, key);
-				}
+				continue;
 			}
-			if(!CHECK(found_count == missing_count))
+			// the error offset
+			if(*it == 0)
 			{
-				return false;
+				auto index = std::distance(translations.begin(), it);
+				++found_count;
+				std::string key = get_index_key(index);
+				// TODO: every time I print a key or value, I should convert escape codes
+				if(key.back() == '\n') key.pop_back();
+				slogf("- `%s`\n", key.c_str());
+				load_index(index, key);
 			}
 		}
-
-		return true;
+		if(!CHECK(found_count == missing_count))
+		{
+			return false;
+		}
 	}
-	serrf("Failed to find language (%s = %s)\n", cv_language.cvar_key, cv_language->c_str());
-
-	return false;
+	return true;
 }
 
 
 void translation_context::on_error(const char* msg)
 {
-	slog(msg);
+	serr(msg);
 }
 void translation_context::on_warning(const char* msg)
 {
-	serr(msg);
+	slog(msg);
 }
 
 TL_RESULT translation_context::on_header(tl_header_tuple& header)
@@ -475,11 +495,11 @@ TL_RESULT translation_context::on_header(tl_header_tuple& header)
 
 void translation_context::load_index(tl_index index, std::string_view value)
 {
-	tl_index offset = memory.size();
+	tl_index offset = translation_memory.size();
 
-	memory.insert(memory.end(), value.begin(), value.end());
+	translation_memory.insert(translation_memory.end(), value.begin(), value.end());
 
-	memory.push_back('\0');
+	translation_memory.push_back('\0');
 
 	// I don't set the c_str() address because of reallocation
 	// so at the end, I set the address offset.

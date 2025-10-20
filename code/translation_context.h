@@ -65,7 +65,7 @@ struct translation_context
 	// a string that contains null terminating strings.
 	// maybe I could insitu load the file,
 	// or just use an arena.
-	std::string memory;
+	std::string translation_memory;
 
 	// I lookup a string based off english_ref.inl
 	// so the ID is ordered based on the location the string is in the english_ref.inl
@@ -77,11 +77,20 @@ struct translation_context
 	// so I don't need to loop through the vector for unloaded translations.
 	size_t num_loaded_translations = 0;
 
+	// a buffer for loading files.
+	std::string slurp_string;
+
 #ifdef TL_COMPILE_TIME_ASSERTS
 	const char* get_text(const char* text, tl_index index);
 #else
 	const char* get_text(const char* text);
 #endif
+
+	bool load_languages(const char* folder);
+	// print warnings about languages.
+	void check_languages();
+
+	bool load_language(language_entry& lang);
 
 #endif // TL_COMPILE_TIME_TRANSLATION
 

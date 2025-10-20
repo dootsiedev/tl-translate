@@ -9,20 +9,19 @@ int main(int argc, char** argv)
 	switch(load_cvar(argc, argv))
 	{
 	case CVAR_LOAD::SUCCESS: break;
-	case CVAR_LOAD::ERROR: return 1;
+	case CVAR_LOAD::ERROR: show_error("cvar error", serr_get_error().c_str()); return 1;
 	case CVAR_LOAD::CLOSE: return 0;
 	}
 
 	if(!get_translation_context().init())
 	{
-		// TODO: show a dialog here.
 		if(!serr_check_error())
 		{
 			slog("init failed without printing to serr.\n");
 		}
 		// clear the buffer.
-		serr_get_error();
-		//return 1;
+		show_error("translation error", serr_get_error().c_str());
+		return 1;
 	}
 
 	slog(_T("test!\n"));

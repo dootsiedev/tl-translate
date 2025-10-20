@@ -471,6 +471,11 @@ public:
 		ASSERT_M(cvar_init_once && "use of cvar before init", cvar_key);
 		return &_internal_data;
 	}
+	const std::string& operator*() const
+	{
+		ASSERT_M(cvar_init_once && "use of cvar before init", cvar_key);
+		return _internal_data;
+	}
 
 	// if you modify a startup value,
 	// the value wont change, but it will be saved.
