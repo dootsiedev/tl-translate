@@ -18,17 +18,17 @@ static_assert([] {
 
 const char* translate_gettext(const char* text, tl_index index)
 {
-	// should be 2 fast lookups.
 	// I could inline/constexpr this function, and it would get rid of the lambda hack,
 	// but I doubt there would be any useful performance gain.
 #ifdef TL_COMPILE_TIME_TRANSLATION
 	switch(get_translation_context().current_lang)
 	{
-#define TL_START(lang, ...)          \
-	case TL_LANG::lang:              \
-		switch(index) \
+#define TL_START(lang, ...) \
+	case TL_LANG::lang:     \
+		switch(index)       \
 		{
-#define TL(x, y) case get_text_index(x): return (y != nullptr) ? y : text;
+#define TL(x, y) \
+	case get_text_index(x): return (y != nullptr) ? y : text;
 #define TL_END() \
 	}            \
 	break;

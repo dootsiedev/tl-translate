@@ -46,7 +46,12 @@ typedef uint32_t translate_hash_type;
 // I add an index so that I can use it to just look up the string.
 const char* translate_gettext(const char* text, tl_index index);
 // abusing lambda to use static_assert in an expression
-#define _T(x) ([] { static_assert(get_text_index(x) != 0, "translation not found"); },translate_gettext(x, get_text_index(x)))
+// I can remove the lambda from the stack using the comma operator,
+// but I feel like reducing the number of times get_text_index is called is more efficient?
+#define _T(x)                                               \
+	[] {                                                    \
+		constexpr auto index = get_text_index(x);           \
+		static_assert(index != 0, "translation not found"); return translate_gettext(x, index); }()
 #else
 // simple gettext style translation done during runtime.
 // I am not using gettext, but I could if I really wanted to.
