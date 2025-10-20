@@ -371,24 +371,16 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     option(USE_CFI "Use clang's Control Flow Integrety sanitizer" OFF)
     if(USE_CFI)
         if(NOT USE_LTO)
+            # note I think CMAKE_INTERPROCEDURAL_OPTIMIZATION will use -flto=thin instead of -flto
+            # but I think the llvm IR is all that matters.
             message(WARNING "you must enable USE_LTO with USE_CLANG_CFI")
         endif()
 
         target_compile_options(ALL_SANITIZERS INTERFACE -DMY_FIX_CFI_ICALL)
 
-        # TODO: I probably could check for CFI sanitizer using a macro?
-        target_compile_options(ALL_SANITIZERS INTERFACE -DFIX_OPENGL_CFI_ICALL)
-
-        #note I think CMAKE_INTERPROCEDURAL_OPTIMIZATION will actually
-        #emit something different than -flto, but I think the llvm IR is all that matters.
-        #target_compile_options(ALL_SANITIZERS INTERFACE -flto)
-        #target_link_options(ALL_SANITIZERS INTERFACE -flto)
-
         #visibility hidden is required
         target_compile_options(ALL_SANITIZERS INTERFACE -fvisibility=hidden)
 
-        #on my system, std::to_string would cause an indirect call error...
-        #maybe that is libstd++'s fault, maybe libc is needed.
         target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize=cfi)# -fno-sanitize=cfi-icall -fsanitize-cfi-icall-generalize-pointers)
         target_link_options(ALL_SANITIZERS INTERFACE -fsanitize=cfi)# -fno-sanitize=cfi-icall -fsanitize-cfi-icall-generalize-pointers)
         #target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-ignorelist=cfi_ignorelist.txt)
@@ -398,6 +390,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         target_link_options(ALL_SANITIZERS INTERFACE -Xclang -funique-source-file-names)
 
         if(PORTABLE)
+            # I think this is set by default
             target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-trap=cfi)
             target_link_options(ALL_SANITIZERS INTERFACE -fsanitize-trap=cfi)
         else()
@@ -408,12 +401,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 endif()
 
 if(WIN32)
-    option(USE_MSVC_CFG "enable /guard:cf on msvc" OFF)
-    if(NOT USE_MSVC_CFG AND USE_SIMPLE_HARDEN AND NOT USE_CFI)
-        set(USE_MSVC_CFG ON)
-    endif()
+    option(USE_MSVC_CFG "enable /guard:cf on msvc" ${USE_SIMPLE_HARDEN})
     if(USE_MSVC_CFG)
-        if(MSVC)
+        if(USE_CFI)
+            message(WARNING "USE_CFI overrides USE_MSVC_CFG")
+        elseif(MSVC)
             target_compile_options(ALL_SANITIZERS INTERFACE /guard:cf)
             target_link_options(ALL_SANITIZERS INTERFACE /guard:cf)
         elseif(MY_CLANGCL)
@@ -537,6 +529,14 @@ else()
     # but boost parser needs C++ exceptions (ew).
     # I don't know why but debug clang (msvc) will crash on exceptions (invalid access, but reldeb works)
     target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/parser/include")
+
+    # non virtual member function call, something with std::any casting.
+    # ideally, I could try to compile ONLY the parser with this flag.
+    # note: boost parser will crash llvm-link with cfi in version 19, but it works tested on 21.
+    if(USE_CFI)
+        target_compile_options(ALL_SANITIZERS INTERFACE -fno-sanitize=cfi-nvcall)
+        target_link_options(ALL_SANITIZERS INTERFACE -fno-sanitize=cfi-nvcall)
+    endif()
 endif()
 
 

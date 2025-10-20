@@ -23,11 +23,19 @@
 // msvc debug-san build is 3mb and 30mb of debug info (600kb + 2mb with TL_COMPILE)
 //
 // msvc clang crash if an exception is thrown unless it's reldeb & no asan (dunno why, update clang?)
-// clang-cfi crashes clang during linking (try separate add_library, or update clang?)
+// clang-cfi crashes because the VS installer is old, it works tested with LLVM 21, failed on 19
 // tons of ubsan implicit conversion errors (separate add_library? or suppressions?)
 //
 // boost parser requires exceptions
 // boost spirit x3/x4 has no-exception support, but vcpkg spirit uses 500mb for x64-windows.
+//
+// TODO: I could modify parser and remove the exceptions and just printing the error handler and crash.
+// Pretty much only for wasm, it does not require exception unwinding,
+//  2 problem:
+//  first is that boost parser rethrows exceptions for utf8 transcoding
+//  which is not an issue because I don't transcode the string
+//  (but... utf8 errors? I see the try/catch is hidden behind a concepts macro)
+//  Also the skip function has it's own rethrow error handler, I don't know if that's used.
 //
 // I would have used spirit-po but gettext on native is not tempting.
 // my compile time mode is intended to be very low effort to get working,
