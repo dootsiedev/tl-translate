@@ -350,7 +350,7 @@ void translation_context::check_languages()
 	// check for duplicates.
 	for(auto it = language_list.begin(); it != language_list.end(); ++it)
 	{
-		for(auto jt = it + 1; jt < language_list.begin(); ++jt)
+		for(auto jt = it + 1; jt != language_list.end(); ++jt)
 		{
 			if(it->long_name == jt->long_name || it->short_name == jt->short_name)
 			{
