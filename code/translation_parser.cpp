@@ -77,13 +77,10 @@
 
 #include <sstream>
 #include <ranges>
-
+// NOLINTBEGIN (bugprone-chained-comparison, google-readability-casting, bugprone-easily-swappable-parameters)
 #ifdef __clang__
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "bugprone-chained-comparison"
-#pragma ide diagnostic ignored "google-readability-casting"
-#pragma ide diagnostic ignored "bugprone-easily-swappable-parameters"
-#pragma clang diagnostic ignored "-Woverloaded-shift-op-parentheses"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverloaded-shift-op-parentheses"
 #endif
 
 namespace bp = boost::parser;
@@ -431,5 +428,6 @@ bool parse_translation_file(
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
+// NOLINTEND (bugprone-chained-comparison, google-readability-casting, bugprone-easily-swappable-parameters)
 
 #endif // TL_COMPILE_TIME_TRANSLATION
