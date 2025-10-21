@@ -8,6 +8,7 @@ static_assert(L'☃' == L'\x2603', "File encoding appears not to be UTF-8");
 #ifdef TL_COMPILE_TIME_ASSERTS
 // you should compile this file at the end of the cmake lists
 // so that english static asserts are done first before the other languages
+// maybe I should put this into it's own file because I want the files to be sorted...
 static_assert([] {
 #define TL(key, value) static_assert(get_text_index(key) != 0, "translation not found");
 #include "../translations/tl_begin_macro.txt"
@@ -19,8 +20,6 @@ static_assert([] {
 
 const char* translate_gettext(const char* text, tl_index index)
 {
-	// I could inline/constexpr this function, and it would get rid of the lambda hack,
-	// but I doubt there would be any useful performance gain.
 #ifdef TL_COMPILE_TIME_TRANSLATION
 	switch(get_translation_context().current_lang)
 	{
@@ -44,6 +43,8 @@ const char* translate_gettext(const char* text, tl_index index)
 #endif
 }
 #else
+// Technically I could use get_text_index, to avoid copy paste,
+// but there would be no optimization, get_text_index is only fast if it's constexpr.
 const char* translate_gettext(const char* text)
 {
 #ifdef TL_COMPILE_TIME_TRANSLATION

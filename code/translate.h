@@ -1,8 +1,5 @@
 #pragma once
 
-
-
-
 #ifdef TL_COMPILE_TIME_ASSERTS
 #include "translate_get_index.h"
 // I add an index so that I can use it to just look up the string.

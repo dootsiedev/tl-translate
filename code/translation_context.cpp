@@ -108,10 +108,12 @@ bool translation_context::init()
 
 #include "core/RWops.h"
 
-// I would have used SDL because I don't want to use a library I don't need to use...
+// I would have used SDL3, but I am trying to reduce dependencies.
 #include <filesystem>
 
+#ifdef TL_COMPILE_TIME_ASSERTS
 #include "util/fnv1a_hash.h"
+#endif
 #include "util/escape_string.h"
 
 // translations in a file
@@ -283,8 +285,8 @@ bool translation_context::load_languages(const char* folder)
 			// but nothing is stopping me from making this multi-threaded.
 			TIMER_U t1 = timer_now();
 #endif
-			// TODO: make a parse_translation_header for performance...
-			//  But I feel like it wont actually make a difference unless I throw an exception...
+			// TODO: make a parse_translation_header for performance?
+			//  but I kind of like the idea of checking for parse errors here...
 			if(!parse_translation_file(*this, slurp_string, loading_path))
 			{
 				return false;
@@ -547,7 +549,7 @@ TL_RESULT translation_context::on_translation(std::string& key, std::optional<st
 	auto index = get_text_index(key);
 	if(index == 0)
 	{
-		// TODO: make tl-string extractor add UNRESOLVED, and ignore it?
+		// TODO: make tl-string extractor add NO_MATCH, and ignore it?
 		tl_parser_ctx->report_warning("text does not exist");
 		return TL_RESULT::WARNING;
 	}
@@ -559,9 +561,6 @@ TL_RESULT translation_context::on_translation(std::string& key, std::optional<st
 		return TL_RESULT::WARNING;
 	}
 
-	// this is a hack because my parser will accept NULL as a string.
-	// I need to either use const char* or std::optional<std::string>
-	// but I don't understand boost parser well enough to parse that.
 	if(!value.has_value())
 	{
 		load_index(index, key);

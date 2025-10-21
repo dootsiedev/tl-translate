@@ -81,7 +81,7 @@ inline bool rem_escape_string(char* input_string)
 				serr("expected escape code, got null\n");
 				return false;
 			default:
-				if(isalnum(input_string[i]))
+				if(isalnum(input_string[i]) != 0)
 				{
 					serrf("expected escape code, got %c\n", input_string[i]);
 					return false;

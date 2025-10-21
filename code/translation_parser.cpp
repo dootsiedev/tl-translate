@@ -1,5 +1,4 @@
 #include "core/global.h"
-
 //
 // long wall of not very useful info
 // TODO: fix warnings...
@@ -44,6 +43,7 @@
 // I could make a custom cmake command that converts the files into json or something.
 //
 
+
 #ifndef TL_COMPILE_TIME_TRANSLATION
 
 #include "translation_parser.h"
@@ -69,6 +69,14 @@
 #include <boost/parser/transcode_view.hpp>
 
 #include <sstream>
+
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "bugprone-chained-comparison"
+#pragma ide diagnostic ignored "google-readability-casting"
+#pragma ide diagnostic ignored "bugprone-easily-swappable-parameters"
+#endif
 
 namespace bp = boost::parser;
 namespace tl_parser
@@ -139,7 +147,8 @@ public:
 
 using namespace bp::literals;
 
-std::string to_utf8(std::u32string& str)
+// this will throw exceptions, maybe replace it with utfcpp (internal functions)
+static std::string to_utf8(std::u32string& str)
 {
 	std::string out;
 	out.reserve(str.size());
@@ -163,7 +172,7 @@ auto const header_action = [](auto& ctx) {
 
 	switch(globals.on_header(entry))
 	{
-	case TL_RESULT::SUCCESS: break;
+	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
 	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
@@ -185,7 +194,7 @@ auto const key_action = [](auto& ctx) {
 
 	switch(globals.on_translation(key, value))
 	{
-	case TL_RESULT::SUCCESS: break;
+	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
 	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
@@ -206,7 +215,7 @@ auto const info_action = [](auto& ctx) {
 
 	switch(globals.on_info(entry))
 	{
-	case TL_RESULT::SUCCESS: break;
+	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
 	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
@@ -225,7 +234,7 @@ auto const no_match_action = [](auto& ctx) {
 
 	switch(globals.on_no_match(entry))
 	{
-	case TL_RESULT::SUCCESS: break;
+	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
 	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
@@ -235,7 +244,7 @@ auto const no_match_action = [](auto& ctx) {
 bp::rule<class header_lang, tl_header_tuple> const header_lang =
 	"TL_START(long_name, short_name, date, git_hash)";
 bp::rule<class tl_key, std::tuple<std::u32string, std::optional<std::u32string>>> const tl_key =
-	"TL(\"key\", \"value\")";
+	"TL(text, translated_text)";
 
 bp::rule<class tl_info, tl_info_tuple> const tl_info = "INFO(source, function, line)";
 bp::rule<class tl_no_match, tl_no_match_tuple> const tl_no_match = "NO_MATCH(date, git_hash)";
@@ -409,5 +418,8 @@ bool parse_translation_file(
 	}
 	return true;
 }
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 #endif // TL_COMPILE_TIME_TRANSLATION

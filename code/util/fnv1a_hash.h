@@ -1,11 +1,13 @@
 #pragma once
-#ifdef TL_USE_64bit_HASH
+
 // from: https://gist.github.com/ruby0x1/81308642d0325fd386237cfa3b44785c
 // FNV1a c++11 constexpr compile time hash functions, 32 and 64 bit
 // str should be a null terminated string literal, value should be left out
 // e.g hash_32_fnv1a_const("example")
 // code license: public domain or equivalent
 // post: https://notes.underscorediscovery.com/constexpr-fnv1a/
+
+#ifdef TL_USE_64bit_HASH
 
 constexpr uint64_t val_64_const = 0xcbf29ce484222325;
 constexpr uint64_t prime_64_const = 0x100000001b3;
