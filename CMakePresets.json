@@ -9,7 +9,7 @@
       "cacheVariables": {
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/../${sourceDirName}-${presetName}-install",
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
-        "USE_CPP23": true,
+        "USE_CPP23": false,
         "USE_CPP_STACKTRACE": true,
         "USE_WIN32_DEBUG_INFO": true,
         "TL_COMPILE_TIME_TRANSLATION": false,

@@ -76,6 +76,7 @@
 #include <boost/parser/transcode_view.hpp>
 
 #include <sstream>
+#include <ranges>
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -159,7 +160,12 @@ static std::string to_utf8(std::u32string& str)
 {
 	std::string out;
 	out.reserve(str.size());
-	std::ranges::copy(str | bp::as_utf8, std::back_inserter(out));
+	for(auto c : str | bp::as_utf8)
+	{
+		out.push_back(c);
+	}
+	// needs C++20
+	//std::ranges::copy(str | bp::as_utf8, std::back_inserter(out));
 	return out;
 };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/global.h"
+#include <optional>
 
 #ifdef TL_COMPILE_TIME_TRANSLATION
 #error "the parser is only for runtime translation."
