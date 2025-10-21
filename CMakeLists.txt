@@ -485,7 +485,6 @@ add_executable(${PROJECT_NAME}
 		code/translation_context.cpp
 		code/translation_parser.h
 		code/translation_parser.cpp
-        code/escape_string.h
 
         code/core/global_pch.h
         code/core/global.h
@@ -502,7 +501,8 @@ add_executable(${PROJECT_NAME}
         code/core/assert.cpp
         code/core/breakpoint.h
 
-        code/3rdParty/fnv1a_hash.h
+        code/util/fnv1a_hash.h
+        code/util/escape_string.h
 
         code/datastructures/BS_stream.h
         code/datastructures/BS_stream.cpp

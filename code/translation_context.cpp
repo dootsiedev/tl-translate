@@ -111,9 +111,8 @@ bool translation_context::init()
 // I would have used SDL because I don't want to use a library I don't need to use...
 #include <filesystem>
 
-#include "3rdParty/fnv1a_hash.h"
-#include "escape_string.h"
-
+#include "util/fnv1a_hash.h"
+#include "util/escape_string.h"
 
 // translations in a file
 static constexpr tl_index get_number_of_translations()
@@ -277,7 +276,7 @@ bool translation_context::load_languages(const char* folder)
 			{
 				return false;
 			}
-//#define CHECK_TIMER
+#define CHECK_TIMER
 #ifdef CHECK_TIMER
 			// small file with like 1000 characters
 			// 0.2 - 0.05 ms on reldeb, 10ms on debug san.
@@ -411,7 +410,7 @@ bool translation_context::load_language(language_entry& lang)
 	if(num_loaded_translations != get_number_of_translations())
 	{
 		size_t missing_count = get_number_of_translations() - num_loaded_translations;
-		slogf("missing translations (%zu): %s\n", missing_count, lang.translation_file.c_str());
+		slogf("warning: missing translations (count: %zu): %s\n", missing_count, lang.translation_file.c_str());
 		size_t found_count = 0;
 		for(auto it = translations.begin(); it != translations.end(); ++it)
 		{
@@ -441,6 +440,8 @@ bool translation_context::load_language(language_entry& lang)
 
 void translation_context::on_error(const char* msg)
 {
+	// TODO: it would be wise to just store the error into a string.
+	//  because serr will print a UGLY stacktrace...
 	serr(msg);
 }
 void translation_context::on_warning(const char* msg)
@@ -448,7 +449,7 @@ void translation_context::on_warning(const char* msg)
 	slog(msg);
 }
 
-TL_RESULT translation_context::on_header(tl_header_tuple& header)
+TL_RESULT translation_context::on_header(tl_header& header)
 {
 #ifdef TL_PRINT_FILE
 	slogf(
@@ -464,17 +465,17 @@ TL_RESULT translation_context::on_header(tl_header_tuple& header)
 	{
 		// I should use emplace_back and designated initializers, but I use C++17.
 		language_entry entry;
-		entry.long_name = std::get<(int)tl_header_get::long_name>(header);
-		entry.short_name = std::get<(int)tl_header_get::short_name>(header);
-		entry.native_name = std::get<(int)tl_header_get::native_name>(header);
+		entry.long_name = std::move(header.long_name);
+		entry.short_name = std::move(header.short_name);
+		entry.native_name = std::move(header.native_name);
 		// I am tempted to move this in, but this string is being used by the parser...
-		entry.translation_file = loading_path;
+		entry.translation_file = std::move(loading_path);
 		language_list.push_back(std::move(entry));
 		return TL_RESULT::SUCCESS;
 	}
 #ifndef NDEBUG
 	// make sure we are using the right language.
-	std::string& found_short = std::get<(int)tl_header_get::short_name>(header);
+	std::string& found_short = header.short_name;
 	if(current_lang == -1)
 	{
 		if(found_short != get_lang_short_name(TL_LANG::English))
@@ -490,7 +491,6 @@ TL_RESULT translation_context::on_header(tl_header_tuple& header)
 	std::string& expected = language_list[current_lang].short_name;
 	if(expected != found_short)
 	{
-		// I should print the file location as well, too lazy.
 		std::string msg;
 		str_asprintf(msg, "unexpected language (expected: %s, got: %s)\n", expected.c_str(), found_short.c_str());
 		tl_parser_ctx->report_error(msg.c_str());
@@ -517,7 +517,7 @@ void translation_context::load_index(tl_index index, std::string_view value)
 
 	ASSERT(num_loaded_translations <= translations.size());
 }
-TL_RESULT translation_context::on_translation(std::string& key, std::string& value)
+TL_RESULT translation_context::on_translation(std::string& key, std::optional<std::string>& value)
 {
 #ifdef TL_PRINT_FILE
 	if(!key.empty() && key.back() == '\n')
@@ -562,7 +562,7 @@ TL_RESULT translation_context::on_translation(std::string& key, std::string& val
 	// this is a hack because my parser will accept NULL as a string.
 	// I need to either use const char* or std::optional<std::string>
 	// but I don't understand boost parser well enough to parse that.
-	if(value == "NULL")
+	if(!value.has_value())
 	{
 		load_index(index, key);
 		// ignore english, there is no translation.
@@ -574,7 +574,7 @@ TL_RESULT translation_context::on_translation(std::string& key, std::string& val
 		return TL_RESULT::SUCCESS;
 	}
 
-	load_index(index, value);
+	load_index(index, *value);
 
 	return TL_RESULT::SUCCESS;
 }

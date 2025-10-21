@@ -6,48 +6,27 @@
 #error "the parser is only for runtime translation."
 #endif
 
-// I think the examples of boost parser using structs requires boost hana.
-// this is not very pretty.
-// I have not tried to make each variable into a class of std::string / int / etc for get<date>
-// and it would be better than casting the enum to an int, but it would be more verbose...
-enum class tl_header_get
+struct tl_header
 {
-	long_name,
-	short_name,
-	native_name,
-	date,
-	git_hash
+	std::string long_name;
+	std::string short_name;
+	std::string native_name;
+	std::string date;
+	std::string git_hash;
 };
 
-typedef std::tuple<std::string, std::string, std::string, std::string, std::string> tl_header_tuple;
-
-enum class tl_info_get
+struct tl_info
 {
-	source_file,
-	function,
-	line,
+	std::string source_file;
+	std::string function;
+	int line;
 };
-typedef std::tuple<std::string, std::string, int> tl_info_tuple;
 
-enum class tl_unresolved_get
+struct tl_no_match
 {
-	date,
-	git_hash
+	std::string date;
+	std::string git_hash;
 };
-typedef std::tuple<std::string, std::string> tl_unresolved_tuple;
-
-#if 0
-enum class tl_maybe_get
-{
-	original_key,
-	source_file,
-	function,
-	line,
-	date,
-	git_hash
-};
-typedef std::tuple<std::string, std::string, std::string, int, std::string, std::string> tl_maybe_tuple;
-#endif
 
 enum class TL_RESULT
 {
@@ -74,16 +53,18 @@ public:
 	virtual void on_warning(const char* msg) = 0;
 	virtual void on_error(const char* msg) = 0;
 
-	virtual TL_RESULT on_header(tl_header_tuple& header) = 0;
-	virtual TL_RESULT on_translation(std::string& key, std::string& value) = 0;
-	virtual TL_RESULT on_info(tl_info_tuple& info)
+	virtual TL_RESULT on_header(tl_header& header) = 0;
+	virtual TL_RESULT on_translation(std::string& key, std::optional<std::string>& value) = 0;
+
+	// not used by the translation context
+	virtual TL_RESULT on_info(tl_info& info)
 	{
 		(void)info;
 		return TL_RESULT::SUCCESS;
 	}
-	virtual TL_RESULT on_unresolved(tl_unresolved_tuple& unresolved)
+	virtual TL_RESULT on_no_match(tl_no_match& no_match)
 	{
-		(void)unresolved;
+		(void)no_match;
 		return TL_RESULT::SUCCESS;
 	}
 

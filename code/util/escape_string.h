@@ -1,10 +1,13 @@
 #pragma once
 
+#include "../core/global.h"
+
 #include <string>
 #include <string_view>
+#include <cstring>
 
 // a string conversion so '\n' turns into "\\\n"
-std::string escape_string(std::string_view input_string)
+inline std::string escape_string(std::string_view input_string)
 {
 	std::string str;
 	if(input_string.empty())
@@ -55,4 +58,41 @@ std::string escape_string(std::string_view input_string)
 	//ASSERT(str.size() == input_string.size() + escape_count);
 
 	return str;
+}
+
+inline bool rem_escape_string(char* input_string)
+{
+	ASSERT(input_string != NULL);
+
+	int i = 0;
+	int j = 0;
+	while(input_string[i] != '\0')
+	{
+		if(input_string[i] == '\\')
+		{
+			++i;
+			switch(input_string[i])
+			{
+			case 'n': input_string[j] = '\n'; break;
+			case 't': input_string[j] = '\t'; break;
+			case '\"': input_string[j] = '\"'; break;
+			case '\\': input_string[j] = '\\'; break;
+			case '\0':
+				serr("expected escape code, got null\n");
+				return false;
+			default:
+				if(isalnum(input_string[i]))
+				{
+					serrf("expected escape code, got %c\n", input_string[i]);
+					return false;
+				}
+				serrf("expected escape code, got #%d\n", input_string[i]);
+				return false;
+			}
+		}
+		++j;
+		++i;
+	}
+	input_string[j] = '\0';
+	return true;
 }

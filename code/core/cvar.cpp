@@ -14,6 +14,7 @@
 
 // for reading files, since I like the stream API.
 #include "../datastructures/BS_stream.h"
+#include "../util/escape_string.h"
 
 // unfortunately std::from_chars for doubles doesn't have great support on compilers...
 // so you need a pretty decent version of gcc or clang...
@@ -492,7 +493,6 @@ static char* musl_strtok_r(char* __restrict s, const char* __restrict sep, char*
 
 static bool cvar_split_line(std::vector<const char*>& arguments, char* line)
 {
-	// TODO (dootsie): could try to support escape keys since I can't insert quotes or newlines?
 	char* token = line;
 	bool in_quotes = false;
 	while(token != NULL)
@@ -506,6 +506,10 @@ static bool cvar_split_line(std::vector<const char*>& arguments, char* line)
 			in_quotes = !in_quotes;
 			if(!in_quotes)
 			{
+				if(!rem_escape_string(token))
+				{
+					return false;
+				}
 				arguments.push_back(token);
 				token = next_quote;
 				continue;
@@ -669,7 +673,7 @@ static void write_cvar_to_stream(BS_WriteStream& writer, V_cvar* cvar)
 	{
 		writer.Put('\"');
 	}
-	for(char c : cvar->cvar_write())
+	for(char c : escape_string(cvar->cvar_write()))
 	{
 		writer.Put(c);
 	}

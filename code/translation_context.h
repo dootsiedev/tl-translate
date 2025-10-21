@@ -57,8 +57,8 @@ struct translation_context
 	void on_error(const char* msg) override;
 	void on_warning(const char* msg) override;
 
-	TL_RESULT on_header(tl_header_tuple& header) override;
-	TL_RESULT on_translation(std::string& key, std::string& value) override;
+	TL_RESULT on_header(tl_header& header) override;
+	TL_RESULT on_translation(std::string& key, std::optional<std::string>& value) override;
 
 	std::vector<language_entry> language_list;
 
