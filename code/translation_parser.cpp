@@ -288,7 +288,9 @@ bp::symbols<uint32_t> const single_escaped_char_def = {
 auto const string_char_def =
 	('\\'_l > single_escaped_char) | (bp::cp - bp::char_(0x0000u, 0x001fu));
 
-// TODO: I want to add multi-line strings by "" \n "" But I think I NEED to use a vector<u32string>
+// IGNORE: I want to add multi-line strings by "" "" But I think I NEED to use a vector<u32string>
+// If allowed the strings to split, it would break the possibility of using the preprocessor -E
+// to generate a JSON file using the macros (but I don't know if it would work without artifacts)
 auto const quoted_string_def = bp::lexeme['"' >> *(string_char - '"') > '"'];
 
 auto const nullable_quoted_string_def = quoted_string | "NULL";
