@@ -497,25 +497,50 @@ static bool cvar_split_line(std::vector<const char*>& arguments, char* line)
 	bool in_quotes = false;
 	while(token != NULL)
 	{
-		char* next_quote = strchr(token, '\"');
+		char* next_quote = strpbrk(token, "\"\\");
 		if(next_quote != NULL)
 		{
-			*next_quote++ = '\0';
-			// note the in_quotes condition is the opposite
-			// because I toggle before the condition.
-			in_quotes = !in_quotes;
-			if(!in_quotes)
+			// skip escaped quotes
+			if(in_quotes)
 			{
-				if(!rem_escape_string(token))
+				do
 				{
-					return false;
+					if(*next_quote == '\"')
+					{
+						// found the quote
+						break;
+					}
+					if(*next_quote++ == '\\')
+					{
+						if(*next_quote++ == '\"')
+						{
+							// keep searching for the quote
+						}
+					}
+					next_quote = strpbrk(next_quote, "\"\\");
+				} while(next_quote != NULL);
+			}
+
+			if(*next_quote == '\"')
+			{
+				*next_quote++ = '\0';
+				// note the in_quotes condition is the opposite
+				// because I toggle before the condition.
+				in_quotes = !in_quotes;
+				if(!in_quotes)
+				{
+					if(!rem_escape_string(token))
+					{
+						return false;
+					}
+					arguments.push_back(token);
+					token = next_quote;
+					continue;
 				}
-				arguments.push_back(token);
-				token = next_quote;
-				continue;
 			}
 		}
 
+		// split by whitespace
 		const char* delim = " ";
 		char* next_token = NULL;
 		token = musl_strtok_r(token, delim, &next_token);

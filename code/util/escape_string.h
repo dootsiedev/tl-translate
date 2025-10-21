@@ -90,6 +90,10 @@ inline bool rem_escape_string(char* input_string)
 				return false;
 			}
 		}
+		if(j < i)
+		{
+			input_string[j] = input_string[i];
+		}
 		++j;
 		++i;
 	}
