@@ -521,7 +521,7 @@ static bool cvar_split_line(std::vector<const char*>& arguments, char* line)
 				} while(next_quote != NULL);
 			}
 
-			if(*next_quote == '\"')
+			if(next_quote != NULL && *next_quote == '\"')
 			{
 				*next_quote++ = '\0';
 				// note the in_quotes condition is the opposite
@@ -671,14 +671,21 @@ bool cvar_file(CVAR_T flags_req, RWops* file)
 {
 	ASSERT(file != NULL);
 
+	int line_num = 1;
+	std::string line_copy;
+
 	return cvar_parse_file_lines(file, [&](char* line, bool empty) -> bool {
 		if(!empty)
 		{
+			line_copy = line;
 			if(!cvar_line(flags_req, line))
 			{
+				// TODO: I could return a number column offset instead of a bool
+				serrf("in %s:%d\n%s\n^\n", file->name(), line_num, line_copy.c_str());
 				return false;
 			}
 		}
+		++line_num;
 		return true;
 	});
 }

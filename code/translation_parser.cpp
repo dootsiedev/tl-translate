@@ -1,3 +1,5 @@
+// This is an independent project of an individual developer. Dear PVS-Studio, please check it.
+// PVS-Studio Static Code Analyzer for C, C++, C#, and Java: https://pvs-studio.com
 #include "core/global.h"
 //
 // long wall of not very useful info
@@ -76,6 +78,7 @@
 #pragma ide diagnostic ignored "bugprone-chained-comparison"
 #pragma ide diagnostic ignored "google-readability-casting"
 #pragma ide diagnostic ignored "bugprone-easily-swappable-parameters"
+#pragma clang diagnostic ignored "-Woverloaded-shift-op-parentheses"
 #endif
 
 namespace bp = boost::parser;
@@ -243,11 +246,11 @@ auto const no_match_action = [](auto& ctx) {
 
 bp::rule<class header_lang, tl_header_tuple> const header_lang =
 	"TL_START(long_name, short_name, date, git_hash)";
-bp::rule<class tl_key, std::tuple<std::u32string, std::optional<std::u32string>>> const tl_key =
+bp::rule<class tl_key_r, std::tuple<std::u32string, std::optional<std::u32string>>> const tl_key_r =
 	"TL(text, translated_text)";
 
-bp::rule<class tl_info, tl_info_tuple> const tl_info = "INFO(source, function, line)";
-bp::rule<class tl_no_match, tl_no_match_tuple> const tl_no_match = "NO_MATCH(date, git_hash)";
+bp::rule<class tl_info_r, tl_info_tuple> const tl_info_r = "INFO(source, function, line)";
+bp::rule<class tl_no_match_r, tl_no_match_tuple> const tl_no_match_r = "NO_MATCH(date, git_hash)";
 bp::rule<class tl_footer> const tl_footer = "'TL_END' 'TL' 'INFO' 'NO_MATCH' etc";
 
 // The json example uses a utf32 transcode, but when parsing unicode characters,
@@ -257,9 +260,10 @@ bp::rule<class tl_footer> const tl_footer = "'TL_END' 'TL' 'INFO' 'NO_MATCH' etc
 // it's possible that boost parser is supports wcout or something weird.
 bp::rule<class string_char, uint32_t> const string_char =
 	"code point (code points <= U+001F must be escaped)";
-bp::rule<class quoted_string, std::u32string> const quoted_string = "quoted string";
 bp::rule<class single_escaped_char, uint32_t> const single_escaped_char =
 	"'\"', '\\', 'n', or 't'";
+bp::rule<class quoted_string, std::u32string> const quoted_string = "quoted string";
+bp::rule<class nullable_quoted_string, std::optional<std::u32string>> const nullable_quoted_string = "quoted string or NULL";
 
 bp::rule<class string_enum, std::string> const string_enum = "enum";
 
@@ -278,8 +282,10 @@ bp::symbols<uint32_t> const single_escaped_char_def = {
 auto const string_char_def =
 	('\\'_l > single_escaped_char) | (bp::cp - bp::char_(0x0000u, 0x001fu));
 
-// TODO: I want to add multi-line strings by "" \n ""
+// TODO: I want to add multi-line strings by "" \n "" But I think I NEED to use a vector<u32string>
 auto const quoted_string_def = bp::lexeme['"' >> *(string_char - '"') > '"'];
+
+auto const nullable_quoted_string_def = quoted_string | "NULL";
 
 // this is not a true C compatible syntax
 auto const string_enum_def = bp::lexeme[+(bp::no_case[bp::char_('a', 'z')] | bp::char_('_'))];
@@ -296,13 +302,13 @@ auto const header_lang_def=
 		> quoted_string
 		> ')';
 
-auto const tl_key_def =
+auto const tl_key_r_def =
 	"TL"_l
-		>> '('_l
-		> quoted_string > (','_l >> (quoted_string | "NULL"))
+		>> '('
+		> quoted_string > ',' > nullable_quoted_string
 		> ')';
 
-auto const tl_info_def =
+auto const tl_info_r_def =
 	"INFO"_l
 	>> '('
 		> quoted_string > ','
@@ -310,16 +316,16 @@ auto const tl_info_def =
 		> bp::int_
 	> ')';
 
-auto const tl_no_match_def =
+auto const tl_no_match_r_def =
 	"NO_MATCH"_l >> '(' > quoted_string > ',' > quoted_string > ')';
 
 auto const tl_footer_def= "TL_END"_l > '(' > ')' > bp::eoi;
 
 auto const root_p =
 	header_lang[header_action]
-	> *( tl_key[key_action]
-		| tl_info[info_action]
-		| tl_no_match[no_match_action]
+	> *( tl_key_r[key_action]
+		| tl_info_r[info_action]
+		| tl_no_match_r[no_match_action]
 		) > tl_footer;
 // clang-format on
 
@@ -327,11 +333,12 @@ BOOST_PARSER_DEFINE_RULES(
 	single_escaped_char,
 	string_char,
 	quoted_string,
+	nullable_quoted_string,
 	string_enum,
 	header_lang,
-	tl_key,
-	tl_info,
-	tl_no_match,
+	tl_key_r,
+	tl_info_r,
+	tl_no_match_r,
 	tl_footer);
 
 struct logging_error_handler
@@ -405,12 +412,7 @@ bool parse_translation_file(
 	auto const parse = bp::with_error_handler(bp::with_globals(tl_parser::root_p, o), err);
 
 	// NOTE: I could enable tracing, but it generates thousands of lines, bp::trace::on);
-	// Unicode is annoying because I don't know what to do.
-	// I want to print the errors in unicode codepoints because the column line is accurate.
-	// but it is kind of slow due to the fact I MUST use u32strings
-	// or else it gets truncated to ascii (basically no translations).
-	// so I convert everything... And I do notice a 2x slowdown (but my file size is tiny).
-	if(!bp::parse(file_contents | bp::as_utf32, parse, tl_parser::skipper))
+	if(!bp::parse(file_contents | bp::as_utf8, parse, tl_parser::skipper))
 	{
 		CHECK(parse.error_handler_.errors_printed && "expected errors to be printed");
 		// I use bp::eps > at the start so that I get an error for a empty file.

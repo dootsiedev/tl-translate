@@ -529,7 +529,7 @@ else()
     # boost parser works standalone (but needs boost hana for structs, I use tuples atm)
     # but boost parser needs C++ exceptions (ew).
     # I don't know why but debug clang (msvc) will crash on exceptions (invalid access, but reldeb works)
-    target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/parser/include")
+    target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/parser/include")
 
     # non virtual member function call, something with std::any casting.
     # ideally, I could try to compile ONLY the parser with this flag.
