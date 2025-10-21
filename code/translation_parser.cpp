@@ -2,49 +2,54 @@
 // PVS-Studio Static Code Analyzer for C, C++, C#, and Java: https://pvs-studio.com
 #include "core/global.h"
 //
+// TODO: supress ubsan unsigned overflow errors...
+// TODO: convert the utf8 to wide, and print to the win32 console on windows... (or utf8 manifest)
+// OPT: check out the C++20 stringview attribute, could be significantly faster.
+//
+// u32string is 2x slower than std::string,
+// but I assume I MUST use it for getting the correct unicode position of the formatted error.
+// but I think maybe I could write my own formatter that parses the utf8
+// (but it probably needs to scan for newlines...)
+//
+// OPT: kind of late, but can a code-gen parsing library
+// replace boost parser with the same level of simplicity?
+//
 // long wall of not very useful info
-// TODO: fix warnings...
-// TODO: add a function rule so that it says "expect function ex: " instead of "TL_END"
-// TODO: test annotations for the string extractor (tl-extract?)
-//		I am worried that the annotations don't include the whole string...
-// TODO: why don't I get a error when I mess with TL_START? can I get more info?
-// NOTE: should I bother with setting the terminal to utf8?
 //
 // so the results of this is that parsing wastes a lot of binary space,
-// and it's painfully slow to build this one file.
+// and it's painfully slow to build + LSP this one file (5 seconds).
 //
-// but boost parser was easy, and the errors are 100x better than anything I could write,
-// and I think I could add something new in a few minutes (as long as I don't get any errors...)
+// but boost parser was easy (as long as I was not reading any errors...),
+// and the errors are 100x better than anything I could write,
+// and I think I could add something new in a few minutes.
+// And I don't need boost, unlike boost spirit x3/x4
 //
-// I think I am leaning towards FetchContent and keeping the ugly tuples
+// boost spirit x3/x4 has no-exception support (unlike parser),
+// but vcpkg spirit uses 500mb for x64-windows.
+// I tried boost spirit x4 first but I got errors due to lacking boost libraries.
+// however boost parser without boost hana needs ugly tuples... (I think)
+//
+// I might be leaning towards including the library with FetchContent and keeping the ugly tuples
 // (unless vcpkg boost parser is header only and setup takes the same time as FetchContent)
 //
-// these numbers are probably old.
+// these numbers are old.
 // msvc release build is 300kb, and includes 10mb of debug info (50kb + 3mb with TL_COMPILE)
 // msvc debug-san build is 3mb and 30mb of debug info (600kb + 2mb with TL_COMPILE)
 //
-// msvc clang crash if an exception is thrown unless it's reldeb & no asan (dunno why, update
-// clang?) clang-cfi crashes because the VS installer is old, it works tested with LLVM 21, failed
-// on 19 tons of ubsan implicit conversion errors (separate add_library? or suppressions?)
-//
-// boost parser requires exceptions
-// boost spirit x3/x4 has no-exception support, but vcpkg spirit uses 500mb for x64-windows.
-//
-// TODO: I could modify parser and remove the exceptions and just printing the error handler and
-//  exit. Pretty much only for wasm, it does not require exception unwinding,
-//  2 problems:
-//  I don't know if I have the context / error handler in the throw, yet (the parser rethrows)
-//  I need a utf8 library because parser will throw utf8 errors.
-//
-// I would have used spirit-po but gettext is not tempting.
-// my compile time mode is intended to be low effort to get working.
-// (but my code might have quirks that prevent it from being a standalone libraries ATM)
-// however, spirit-po does have plural handling that I don't.
+// clang-cl crashes if an exception is thrown unless it's reldeb & no asan.
+// clang-cfi crashes on old versions, it works tested with LLVM 21
 //
 // If C++ exceptions or optimized binary bloat became a hard blocker (wasm),
-// I could make a custom cmake command that converts the files into json or something.
+// - I could make a custom cmake command that converts the files into json or something.
+// - I could modify parser and remove the exceptions and just print the error handler and exit().
+//  2 problems:
+//  I don't exactly know if I can call the error handler in the throw, yet (the parser rethrows)
+//  I need a utf8 library because parser will throw utf8 errors (I think).
 //
-
+// I would have looked into spirit-po if it did not use C++ exceptions.
+// spirit-po does have plural handling that I don't support.
+//
+//
 
 #ifndef TL_COMPILE_TIME_TRANSLATION
 
@@ -71,7 +76,6 @@
 #include <boost/parser/transcode_view.hpp>
 
 #include <sstream>
-
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -244,6 +248,7 @@ auto const no_match_action = [](auto& ctx) {
 	globals.tl_parser_ctx = nullptr;
 };
 
+// TODO: make naming more consistent...
 bp::rule<class header_lang, tl_header_tuple> const header_lang =
 	"TL_START(long_name, short_name, date, git_hash)";
 bp::rule<class tl_key_r, std::tuple<std::u32string, std::optional<std::u32string>>> const tl_key_r =
@@ -260,10 +265,10 @@ bp::rule<class tl_footer> const tl_footer = "'TL_END' 'TL' 'INFO' 'NO_MATCH' etc
 // it's possible that boost parser is supports wcout or something weird.
 bp::rule<class string_char, uint32_t> const string_char =
 	"code point (code points <= U+001F must be escaped)";
-bp::rule<class single_escaped_char, uint32_t> const single_escaped_char =
-	"'\"', '\\', 'n', or 't'";
+bp::rule<class single_escaped_char, uint32_t> const single_escaped_char = "'\"', '\\', 'n', or 't'";
 bp::rule<class quoted_string, std::u32string> const quoted_string = "quoted string";
-bp::rule<class nullable_quoted_string, std::optional<std::u32string>> const nullable_quoted_string = "quoted string or NULL";
+bp::rule<class nullable_quoted_string, std::optional<std::u32string>> const nullable_quoted_string =
+	"quoted string or NULL";
 
 bp::rule<class string_enum, std::string> const string_enum = "enum";
 
@@ -274,10 +279,7 @@ auto const comment = "/*" >> *(bp::char_ - "*/") >> "*/" |
 auto const skipper = comment | bp::ws;
 
 bp::symbols<uint32_t> const single_escaped_char_def = {
-	{"\"", 0x0022u},
-	{"\\", 0x005cu},
-	{"n", 0x000au},
-	{"t", 0x0009u}};
+	{"\"", 0x0022u}, {"\\", 0x005cu}, {"n", 0x000au}, {"t", 0x0009u}};
 
 auto const string_char_def =
 	('\\'_l > single_escaped_char) | (bp::cp - bp::char_(0x0000u, 0x001fu));

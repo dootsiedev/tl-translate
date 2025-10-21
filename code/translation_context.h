@@ -53,6 +53,7 @@ struct translation_context
 	std::string loading_path;
 
 	void load_index(tl_index index, std::string_view value);
+	bool check_printf_specifiers(const char* key, const char* value);
 
 	void on_error(const char* msg) override;
 	void on_warning(const char* msg) override;
@@ -65,6 +66,8 @@ struct translation_context
 	// a string that contains null terminating strings.
 	// maybe I could insitu load the file,
 	// or just use an arena.
+	// I think I could also make sure that the strings are never modified by locking the memory
+	// using OS functions.
 	std::string translation_memory;
 
 	// I lookup a string based off english_ref.inl

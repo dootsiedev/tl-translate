@@ -4,7 +4,7 @@
 
 #include "core/cvar.h"
 
-translation_context &get_translation_context()
+translation_context& get_translation_context()
 {
 	static translation_context g_translation_context;
 	return g_translation_context;
@@ -22,13 +22,16 @@ static const char* get_lang_short_name(TL_LANG lang);
 // and I don't like having a weird behavior of only translating after cv_language.
 static REGISTER_CVAR_STRING(
 	cv_language,
+	// TODO: it probably would be better if I just had a TL_DEFAULT_LANG
+	//  and rename english_ref.inl to default_lang.inl
 	get_lang_short_name(TL_LANG::English),
 	"set to JP for japanese, you can use the short or long name",
 	CVAR_T::STARTUP);
 
 static const char* get_lang_long_name(TL_LANG lang)
 {
-#define TL_START(lang, ...) case TL_LANG::lang: return #lang;
+#define TL_START(lang, ...) \
+	case TL_LANG::lang: return #lang;
 #include "../translations/tl_begin_macro.txt"
 	switch(lang)
 	{
@@ -40,7 +43,8 @@ static const char* get_lang_long_name(TL_LANG lang)
 }
 static const char* get_lang_short_name(TL_LANG lang)
 {
-#define TL_START(lang,short_name, ...) case TL_LANG::lang: return #short_name;
+#define TL_START(lang, short_name, ...) \
+	case TL_LANG::lang: return #short_name;
 #include "../translations/tl_begin_macro.txt"
 	switch(lang)
 	{
@@ -61,7 +65,6 @@ static int get_language_count()
 #include "../translations/tl_end_macro.txt"
 	return count;
 }
-
 
 #ifdef TL_COMPILE_TIME_TRANSLATION
 static int has_compile_time_translations = 1;
@@ -91,7 +94,8 @@ bool translation_context::init()
 	for(int i = 0; i != get_language_count(); ++i)
 	{
 		TL_LANG lang = static_cast<TL_LANG>(i);
-		if(cv_language.data() == get_lang_long_name(lang) || cv_language.data() == get_lang_short_name(lang))
+		if(cv_language.data() == get_lang_long_name(lang) ||
+		   cv_language.data() == get_lang_short_name(lang))
 		{
 			current_lang = lang;
 			return true;
@@ -104,7 +108,6 @@ bool translation_context::init()
 }
 
 #else // TL_COMPILE_TIME_TRANSLATION
-
 
 #include "translate_get_index.h"
 
@@ -133,7 +136,12 @@ static constexpr const char* get_index_key(tl_index find_index)
 {
 	// index 0 is uninitialized.
 	tl_index index = 1;
-#define TL(key, _) if(find_index == index) {return key;} index++;
+#define TL(key, _)          \
+	if(find_index == index) \
+	{                       \
+		return key;         \
+	}                       \
+	index++;
 #include "../translations/tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
 #include "../translations/tl_end_macro.txt"
@@ -186,7 +194,8 @@ bool translation_context::init()
 
 #ifdef NDEBUG
 	// fastpath, if english, skip everything and only use english.
-	if(cv_language.data() == get_lang_short_name(TL_LANG::English) || cv_language.data() == get_lang_long_name(TL_LANG::English))
+	if(cv_language.data() == get_lang_short_name(TL_LANG::English) ||
+	   cv_language.data() == get_lang_long_name(TL_LANG::English))
 	{
 		return true;
 	}
@@ -223,7 +232,7 @@ bool translation_context::init()
 	translation_memory.push_back('\0');
 
 	int lang_index = 0;
-	for(auto& lang: language_list)
+	for(auto& lang : language_list)
 	{
 		if(lang.long_name != *cv_language && lang.short_name != *cv_language)
 		{
@@ -303,10 +312,10 @@ bool translation_context::load_languages(const char* folder)
 // but __has_embed works.
 // I could try to replace all_languages.inl to use #embed but I bet it wont respect macros.
 #if defined(__has_embed) && !defined(NDEBUG) // __cpp_pp_embed
-			//#if __has_embed("../translations/english_ref.inl") != __STDC_EMBED_NOT_FOUND__
-			// check to see if the english ref matches the hash made during compilation.
-			// this seems to defeat the purpose of runtime translations,
-			// but I find it to annoying if I accidentally load the wrong translations.
+			// #if __has_embed("../translations/english_ref.inl") != __STDC_EMBED_NOT_FOUND__
+			//  check to see if the english ref matches the hash made during compilation.
+			//  this seems to defeat the purpose of runtime translations,
+			//  but I find it to annoying if I accidentally load the wrong translations.
 
 			if(language_list.back().short_name == get_lang_short_name(TL_LANG::English))
 			{
@@ -319,7 +328,8 @@ bool translation_context::load_languages(const char* folder)
 				{
 					slogf(
 						"info: compile time hash mismatch (size: %zu, found: %zu): %s\n",
-						std::size(english_data) - 1, slurp_string.size(),
+						std::size(english_data) - 1,
+						slurp_string.size(),
 						// I should print the absolute path,
 						// but I feel like absolute paths in logs is a privacy issue.
 						loading_path.c_str());
@@ -414,7 +424,10 @@ bool translation_context::load_language(language_entry& lang)
 	if(num_loaded_translations != get_number_of_translations())
 	{
 		size_t missing_count = get_number_of_translations() - num_loaded_translations;
-		slogf("warning: missing translations (count: %zu): %s\n", missing_count, lang.translation_file.c_str());
+		slogf(
+			"warning: missing translations (count: %zu): %s\n",
+			missing_count,
+			lang.translation_file.c_str());
 		size_t found_count = 0;
 		for(auto it = translations.begin(); it != translations.end(); ++it)
 		{
@@ -440,7 +453,6 @@ bool translation_context::load_language(language_entry& lang)
 	}
 	return true;
 }
-
 
 void translation_context::on_error(const char* msg)
 {
@@ -496,7 +508,11 @@ TL_RESULT translation_context::on_header(tl_header& header)
 	if(expected != found_short)
 	{
 		std::string msg;
-		str_asprintf(msg, "unexpected language (expected: %s, got: %s)\n", expected.c_str(), found_short.c_str());
+		str_asprintf(
+			msg,
+			"unexpected language (expected: %s, got: %s)\n",
+			expected.c_str(),
+			found_short.c_str());
 		tl_parser_ctx->report_error(msg.c_str());
 		return TL_RESULT::FAILURE;
 	}
@@ -520,6 +536,92 @@ void translation_context::load_index(tl_index index, std::string_view value)
 	num_loaded_translations++;
 
 	ASSERT(num_loaded_translations <= translations.size());
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+bool translation_context::check_printf_specifiers(const char* key, const char* value)
+{
+	// count the number, so I can print it.
+	int key_count = 0;
+	int value_count = 0;
+	const char* found_key = key;
+	const char* found_value = value;
+	do
+	{
+		if(found_key != nullptr) found_key = strchr(found_key, '%');
+		if(found_value != nullptr) found_value = strchr(found_value, '%');
+		if(found_key != nullptr && found_value != nullptr)
+		{
+			switch(found_key[1])
+			{
+			case '%':
+			case 'f':
+			case 'F':
+			case 'g':
+			case 'G':
+			case 'e':
+			case 'E':
+				// above are all floats, I want to allow mixing, but it does not matter.
+			case 'd':
+			case 'u':
+			case 's':
+			case 'c':
+			case 'x':
+			case 'X':
+			case 'p':
+				if(found_key[1] != found_value[1])
+				{
+					std::string str;
+					str_asprintf(
+						str,
+						"mismatching %% format specifier! (%%%c != %%%c)\n",
+						found_key[1],
+						found_value[1]);
+					tl_parser_ctx->report_error(str.c_str());
+					return false;
+				}
+				break;
+			default: {
+				// this is a warning because this is unreachable,
+				// if you change the specifier it will not match,
+				// if you change the key, it will not find the translation.
+				std::string str;
+				str_asprintf(str, "unknown key %% format specifier! (%%%c)\n", found_key[1]);
+				tl_parser_ctx->report_warning(str.c_str());
+			}
+			}
+		}
+
+		if(found_key != nullptr)
+		{
+			found_key++;
+			if(*(found_key) == '%')
+			{
+				found_key++;
+			}
+			key_count++;
+		}
+		if(found_value != nullptr)
+		{
+			found_value++;
+			if(*(found_value) == '%')
+			{
+				found_value++;
+			}
+			value_count++;
+		}
+	} while(found_key != nullptr || found_value != nullptr);
+
+	if(key_count != value_count)
+	{
+		std::string str;
+		str_asprintf(
+			str, "mismatching %% format specifier count! (%d != %d)\n", key_count, value_count);
+		tl_parser_ctx->report_error(str.c_str());
+		return false;
+	}
+
+	return true;
 }
 TL_RESULT translation_context::on_translation(std::string& key, std::optional<std::string>& value)
 {
@@ -573,6 +675,12 @@ TL_RESULT translation_context::on_translation(std::string& key, std::optional<st
 			return TL_RESULT::WARNING;
 		}
 		return TL_RESULT::SUCCESS;
+	}
+
+	// check printf specifiers
+	if(!check_printf_specifiers(key.c_str(), value->c_str()))
+	{
+		return TL_RESULT::FAILURE;
 	}
 
 	load_index(index, *value);
