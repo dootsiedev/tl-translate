@@ -1066,13 +1066,14 @@ static bool cvar_propagate_blame_defaults(V_cvar* parent)
 {
 	ASSERT_M(recursion_count < 10, parent->cvar_key);
 
-	#ifdef DISABLE_SDL
+#ifdef DISABLE_SDL
 	if(parent->internal_cvar_type == CVAR_T::DISABLED)
 	{
-		serrf("Error: Cannot revert due to disabled hard coded cvar\n"
-			  "`%s` = %s\n",
-			  parent->cvar_key,
-			  parent->cvar_write().c_str());
+		serrf(
+			"Error: Cannot revert due to disabled hard coded cvar\n"
+			"`%s` = %s\n",
+			parent->cvar_key,
+			parent->cvar_write().c_str());
 		return false;
 	}
 	V_cvar* blame = parent->cvar_get_blame();
@@ -1086,7 +1087,7 @@ static bool cvar_propagate_blame_defaults(V_cvar* parent)
 	// I don't want console prompt for keeping.
 	slogf("info: doing nothing.\n");
 	return true;
-	#else
+#else
 	int result = cvar_open_revert_dialog(parent);
 	switch(result)
 	{
@@ -1178,7 +1179,6 @@ enum
 {
 	cvar_header_size = sizeof(cvar_temp_header) - 1
 };
-
 
 // TODO: this should be global, but it's more portable if I used whereami or something.
 static const char* prog_name = "<unknown>";
@@ -1330,7 +1330,7 @@ CVAR_LOAD load_cvar(int argc, char** argv)
 		++argv;
 	}
 
-	#ifndef DISABLE_SDL
+#ifndef DISABLE_SDL
 	// '+' because read and write required.
 	FILE* cvar_temp_fp = fopen(cvar_temp_file, "rb+");
 	if(cvar_temp_fp == NULL)
@@ -1510,7 +1510,7 @@ CVAR_LOAD load_cvar(int argc, char** argv)
 		}
 		if(argv[i][0] == '+')
 		{
-			//slogf("%d\n", argc);
+			// slogf("%d\n", argc);
 			int ret = cvar_arg(CVAR_T::STARTUP, argc - i, argv + i);
 			if(ret == -1)
 			{
@@ -1731,7 +1731,7 @@ bool save_cvar()
 
 	return success;
 }
-#else	// DISABLE_SDL
+#else // DISABLE_SDL
 
 bool save_cvar()
 {

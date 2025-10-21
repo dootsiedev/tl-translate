@@ -16,22 +16,20 @@ inline std::string escape_string(std::string_view input_string)
 	}
 
 	int escape_count = 0;
-	for(char c: input_string)
+	for(char c : input_string)
 	{
 		switch(c)
 		{
 		case '\n':
 		case '\t':
 		case '\"':
-		case '\\':
-			escape_count++;
-			break;
+		case '\\': escape_count++; break;
 		}
 	}
 	// I could use __cpp_lib_string_resize_and_overwrite
 	str.reserve(input_string.size() + escape_count);
 
-	for(char c: input_string)
+	for(char c : input_string)
 	{
 		switch(c)
 		{
@@ -51,11 +49,10 @@ inline std::string escape_string(std::string_view input_string)
 			str.push_back('\\');
 			str.push_back('\\');
 			break;
-		default:
-			str.push_back(c);
+		default: str.push_back(c);
 		}
 	}
-	//ASSERT(str.size() == input_string.size() + escape_count);
+	// ASSERT(str.size() == input_string.size() + escape_count);
 
 	return str;
 }
@@ -77,9 +74,7 @@ inline bool rem_escape_string(char* input_string)
 			case 't': input_string[j] = '\t'; break;
 			case '\"': input_string[j] = '\"'; break;
 			case '\\': input_string[j] = '\\'; break;
-			case '\0':
-				serr("expected escape code, got null\n");
-				return false;
+			case '\0': serr("expected escape code, got null\n"); return false;
 			default:
 				if(isalnum(input_string[i]) != 0)
 				{

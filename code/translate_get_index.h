@@ -11,7 +11,9 @@ inline constexpr tl_index get_text_index(std::string_view text)
 {
 	// index 0 is uninitialized.
 	tl_index index = 1;
+	// clang-format off
 #define TL(key, value) if(std::string_view(key) == text) {return index;} index++;
+// clang-format on
 #include "../translations/tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
 #include "../translations/tl_end_macro.txt"

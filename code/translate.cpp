@@ -19,7 +19,6 @@ static_assert([] {
 	return true;
 }());
 
-
 const char* translate_gettext(const char* text, tl_index index)
 {
 #ifdef TL_COMPILE_TIME_TRANSLATION
@@ -30,7 +29,9 @@ const char* translate_gettext(const char* text, tl_index index)
 	case TL_LANG::lang:     \
 		switch(index)       \
 		{
-#define TL(x, y) case get_text_index(x): return (y != nullptr) ? y : text;
+// clang-format off
+#define TL(x, y)  case get_text_index(x): return (y != nullptr) ? y : text;
+// clang-format on
 #define TL_END() \
 	}            \
 	break;
@@ -50,12 +51,13 @@ const char* translate_gettext(const char* text, tl_index index)
 const char* translate_gettext(const char* text)
 {
 #ifdef TL_COMPILE_TIME_TRANSLATION
+	// clang-format off
 	switch(get_translation_context().current_lang)
 	{
 	case TL_LANG::English: return text;
 // switch statement entry
 #define TL_START(lang, ...) case TL_LANG::lang:
-#define TL(x, y) if(strcmp(x, text) == 0) return (y != nullptr) ? y : text;
+#define TL(x, y) if(strcmp(x, text) == 0) { return (y != nullptr) ? y : text; }
 #define TL_END() break;
 #include "../translations/tl_begin_macro.txt"
 #include "../translations/tl_all_languages.txt"
@@ -63,6 +65,7 @@ const char* translate_gettext(const char* text)
 	}
 	ASSERT_M("translation not found", text);
 	return text;
+// clang-format on
 #else
 	return get_translation_context().get_text(text);
 #endif

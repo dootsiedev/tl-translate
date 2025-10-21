@@ -10,7 +10,9 @@ const char* translate_gettext(const char* text, tl_index index);
 #define _T(x)                                               \
 	[] {                                                    \
 		constexpr auto index = get_text_index(x);           \
-		static_assert(index != 0, "translation not found"); return translate_gettext(x, index); }()
+		static_assert(index != 0, "translation not found"); \
+		return translate_gettext(x, index);                 \
+	}()
 #else
 // simple gettext style translation done during runtime.
 // I am not using gettext, but I could if I really wanted to.

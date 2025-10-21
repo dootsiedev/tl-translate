@@ -77,7 +77,8 @@
 
 #include <sstream>
 #include <ranges>
-// NOLINTBEGIN (bugprone-chained-comparison, google-readability-casting, bugprone-easily-swappable-parameters)
+// NOLINTBEGIN (bugprone-chained-comparison, google-readability-casting,
+// bugprone-easily-swappable-parameters)
 #ifdef __clang__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Woverloaded-shift-op-parentheses"
@@ -162,7 +163,7 @@ static std::string to_utf8(std::u32string& str)
 		out.push_back(c);
 	}
 	// needs C++20
-	//std::ranges::copy(str | bp::as_utf8, std::back_inserter(out));
+	// std::ranges::copy(str | bp::as_utf8, std::back_inserter(out));
 	return out;
 };
 
@@ -428,6 +429,7 @@ bool parse_translation_file(
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
-// NOLINTEND (bugprone-chained-comparison, google-readability-casting, bugprone-easily-swappable-parameters)
+// NOLINTEND (bugprone-chained-comparison, google-readability-casting,
+// bugprone-easily-swappable-parameters)
 
 #endif // TL_COMPILE_TIME_TRANSLATION

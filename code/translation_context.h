@@ -7,10 +7,10 @@
 
 #include <vector>
 
-
 #define TL_START(lang, ...) lang,
 #include "../translations/tl_begin_macro.txt"
-enum class TL_LANG{
+enum class TL_LANG
+{
 #include "../translations/english_ref.inl"
 #include "../translations/tl_all_languages.txt"
 };
@@ -20,7 +20,6 @@ enum class TL_LANG{
 #include "translation_parser.h"
 #include <map>
 #endif // TL_COMPILE_TIME_TRANSLATION
-
 
 struct translation_context
 #ifndef TL_COMPILE_TIME_TRANSLATION
@@ -101,4 +100,4 @@ struct translation_context
 	NDSERR bool init();
 };
 
-translation_context &get_translation_context();
+translation_context& get_translation_context();
