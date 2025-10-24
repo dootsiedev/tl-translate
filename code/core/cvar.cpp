@@ -14,7 +14,7 @@
 
 // for reading files, since I like the stream API.
 #include "../datastructures/BS_stream.h"
-#include "../util/escape_string.h"
+#include "../util/string_tools.h"
 
 // unfortunately std::from_chars for doubles doesn't have great support on compilers...
 // so you need a pretty decent version of gcc or clang...
@@ -705,7 +705,9 @@ static void write_cvar_to_stream(BS_WriteStream& writer, V_cvar* cvar)
 	{
 		writer.Put('\"');
 	}
-	for(char c : escape_string(cvar->cvar_write()))
+	std::string escaped_string;
+	escape_string(escaped_string, cvar->cvar_write());
+	for(char c : escaped_string)
 	{
 		writer.Put(c);
 	}
@@ -1311,20 +1313,7 @@ CVAR_LOAD load_cvar(int argc, char** argv)
 	if(argc >= 1)
 	{
 		ASSERT(argv[0] != NULL);
-		// I'm sure there is a one-liner to do this... too lazy.
-		// TODO: put this into a function since I use it a lot in stacktrace code
-		const char* temp_result = strrchr(argv[0], '\\');
-		if(temp_result != NULL)
-		{
-			// could be avoided
-			prog_name = temp_result + 1;
-		}
-		temp_result = strrchr(argv[0], '/');
-		if(temp_result != NULL)
-		{
-			// could be avoided
-			prog_name = temp_result + 1;
-		}
+		prog_name = remove_file_path(prog_name);
 		// remove program name from arguments
 		--argc;
 		++argv;

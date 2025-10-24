@@ -25,22 +25,25 @@
 // And I don't need boost, unlike boost spirit x3/x4
 //
 // boost spirit x3/x4 has no-exception support (unlike parser),
-// but vcpkg spirit uses 500mb for x64-windows.
-// I tried boost spirit x4 first but I got errors due to lacking boost libraries.
+// but vcpkg spirit uses 500mb for x64-windows (I THOUGHT IT WAS HEADER ONLY!).
+// I tried boost spirit x4 from github but I got errors due to lacking boost libraries.
+// (I did get pretty close to getting it working, I think it didn't understand tuples or something)
 // however boost parser without boost hana needs ugly tuples... (I think)
 //
 // I might be leaning towards including the library with FetchContent and keeping the ugly tuples
 // (unless vcpkg boost parser is header only and setup takes the same time as FetchContent)
 //
 // these numbers are old.
-// msvc release build is 300kb, and includes 10mb of debug info (50kb + 3mb with TL_COMPILE)
-// msvc debug-san build is 3mb and 30mb of debug info (600kb + 2mb with TL_COMPILE)
+// msvc release build is 300kb and 10mb of debug info (50kb + 3mb without parser)
+// msvc debug-san build is 3mb and 30mb of debug info (600kb + 2mb without parser)
 //
-// clang-cl crashes if an exception is thrown unless it's reldeb & no asan.
+// clang-cl crashes if a parsing error occurs (can't do exceptions) unless it's reldeb & no asan.
 // clang-cfi crashes on old versions, it works tested with LLVM 21
 //
 // If C++ exceptions or optimized binary bloat became a hard blocker (wasm),
 // - I could make a custom cmake command that converts the files into json or something.
+//	 I think I could use the -E preprocessor command, but it won't be formatted nicely...
+//	 or for speed, I could use a binary flatbuffer
 // - I could modify parser and remove the exceptions and just print the error handler and exit().
 //  2 problems:
 //  I don't exactly know if I can call the error handler in the throw, yet (the parser rethrows)
@@ -289,8 +292,10 @@ auto const string_char_def =
 	('\\'_l > single_escaped_char) | (bp::cp - bp::char_(0x0000u, 0x001fu));
 
 // IGNORE: I want to add multi-line strings by "" "" But I think I NEED to use a vector<u32string>
-// If allowed the strings to split, it would break the possibility of using the preprocessor -E
-// to generate a JSON file using the macros (but I don't know if it would work without artifacts)
+// If I allowed the strings to split, it would break the possibility of using the preprocessor -E
+// to generate a JSON file using the macros.
+// but I don't know if it would work (valid json) and or if it's useful... (removing exceptions)
+// I would need to re-format it (pretty print) as well
 auto const quoted_string_def = bp::lexeme['"' >> *(string_char - '"') > '"'];
 
 auto const nullable_quoted_string_def = quoted_string | "NULL";
@@ -422,8 +427,8 @@ bool parse_translation_file(
 	// NOTE: I could enable tracing, but it generates thousands of lines, bp::trace::on);
 	if(!bp::parse(file_contents | bp::as_utf8, parse, tl_parser::skipper))
 	{
-		CHECK(parse.error_handler_.errors_printed && "expected errors to be printed");
 		// I use bp::eps > at the start so that I get an error for a empty file.
+		CHECK(parse.error_handler_.errors_printed && "expected errors to be printed");
 		return false;
 	}
 	return true;

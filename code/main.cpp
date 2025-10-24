@@ -26,9 +26,15 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
+	// TRANSLATORS: this is a comment!
 	slog(_T("test!\n"));
-	slogf(_T("test %s!\n"), "foo");
-	slogf(_T("test\nnewline: %s!\n"), "bar");
+
+	slogf(/* TRANSLATORS: another comment!*/ _T("test %s!\n"), "foo");
+
+	slogf(
+		_T("test\nnewline: %s!\n") // TRANSLATORS: a third comment!
+		,
+		"bar");
 
 	// slogf(_T("unknown!\n"), "bar");
 

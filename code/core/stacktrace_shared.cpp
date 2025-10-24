@@ -5,6 +5,8 @@
 #include "stacktrace.h"
 #include "breakpoint.h"
 
+#include "../util/string_tools.h"
+
 static int has_stacktrace
 #ifdef HAS_STACKTRACE_PROBABLY
 	= 1;
@@ -138,19 +140,7 @@ MY_NOINLINE bool write_cpp23_stacktrace(debug_stacktrace_observer& printer, int 
 
 			if(cv_bt_full_paths.data() == 0)
 			{
-				// I think there is a std::string function with multi delimiter.
-				const char* temp_filename = strrchr(file.c_str(), '\\');
-				if(temp_filename != NULL)
-				{
-					// could be avoided
-					file = temp_filename + 1;
-				}
-				temp_filename = strrchr(file.c_str(), '/');
-				if(temp_filename != NULL)
-				{
-					// could be avoided
-					file = temp_filename + 1;
-				}
+				file = remove_file_path(file.c_str());
 			}
 
 			// not sure if this is right.

@@ -119,7 +119,7 @@ bool translation_context::init()
 #ifdef TL_COMPILE_TIME_ASSERTS
 #include "util/fnv1a_hash.h"
 #endif
-#include "util/escape_string.h"
+#include "util/string_tools.h"
 
 // translations in a file
 static constexpr tl_index get_number_of_translations()
@@ -442,7 +442,10 @@ bool translation_context::load_language(language_entry& lang)
 				auto index = std::distance(translations.begin(), it);
 				++found_count;
 				const char* key = get_index_key(index);
-				slogf("- \"%s\"\n", escape_string(key).c_str());
+
+				std::string escaped_string;
+				escape_string(escaped_string, key);
+				slogf("- \"%s\"\n", escaped_string.c_str());
 				load_index(index, key);
 			}
 		}

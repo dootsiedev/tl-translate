@@ -502,7 +502,7 @@ add_executable(${PROJECT_NAME}
         code/core/breakpoint.h
 
         code/util/fnv1a_hash.h
-        code/util/escape_string.h
+        code/util/string_tools.h
 
         code/datastructures/BS_stream.h
         code/datastructures/BS_stream.cpp

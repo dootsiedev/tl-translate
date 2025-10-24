@@ -6,6 +6,8 @@
 
 #include "stacktrace.h"
 
+#include "../util/string_tools.h"
+
 #ifdef USE_WIN32_DEBUG_INFO
 static int has_stacktrace_dbghelp = 1;
 #else
@@ -167,15 +169,7 @@ static void
 	ih_line.SizeOfStruct = sizeof(IMAGEHLP_LINE);
 	if(SymGetLineFromAddr64_(proc, stack_frame, &line_disp, &ih_line) != FALSE)
 	{
-		filename = ih_line.FileName;
-		if(cv_bt_full_paths.data() == 0)
-		{
-			const char* temp_filename = strrchr(filename, '\\');
-			if(temp_filename != NULL)
-			{
-				filename = temp_filename + 1;
-			}
-		}
+		filename = remove_file_path(ih_line.FileName);
 		lineno = ih_line.LineNumber;
 	}
 
