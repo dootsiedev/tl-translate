@@ -429,6 +429,8 @@ bool translation_context::load_language(language_entry& lang)
 			missing_count,
 			lang.translation_file.c_str());
 		size_t found_count = 0;
+
+		std::string escaped_string;
 		for(auto it = translations.begin(); it != translations.end(); ++it)
 		{
 			// this is the error string placeholder
@@ -443,7 +445,7 @@ bool translation_context::load_language(language_entry& lang)
 				++found_count;
 				const char* key = get_index_key(index);
 
-				std::string escaped_string;
+				escaped_string.clear();
 				escape_string(escaped_string, key);
 				slogf("- \"%s\"\n", escaped_string.c_str());
 				load_index(index, key);
