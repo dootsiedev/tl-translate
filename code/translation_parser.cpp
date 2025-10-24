@@ -109,11 +109,12 @@ typedef std::tuple<std::string, std::string, std::u32string, std::u32string, std
 
 enum class tl_info_get
 {
-	source_file,
 	function,
+	source_file,
 	line,
+	column
 };
-typedef std::tuple<std::u32string, std::u32string, int> tl_info_tuple;
+typedef std::tuple<std::u32string, std::u32string, int, int> tl_info_tuple;
 
 enum class tl_no_match_get
 {
@@ -255,12 +256,30 @@ auto const no_match_action = [](auto& ctx) {
 	globals.tl_parser_ctx = nullptr;
 };
 
+auto const comment_action = [](auto& ctx) {
+	auto& globals = bp::_globals(ctx);
+
+	report_wrapper wrap(ctx);
+	globals.tl_parser_ctx = &wrap;
+
+	auto comment = to_utf8(bp::_attr(ctx));
+
+	switch(globals.on_comment(comment))
+	{
+	case TL_RESULT::SUCCESS:
+	case TL_RESULT::WARNING: break;
+	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
+	}
+	globals.tl_parser_ctx = nullptr;
+};
+
 // TODO: make naming more consistent...
 bp::rule<class header_lang, tl_header_tuple> const header_lang =
 	"TL_START(long_name, short_name, date, git_hash)";
 bp::rule<class tl_key_r, std::tuple<std::u32string, std::optional<std::u32string>>> const tl_key_r =
 	"TL(text, translated_text)";
 
+bp::rule<class tl_comment_r, std::u32string> const tl_comment_r = "COMMENT(text)";
 bp::rule<class tl_info_r, tl_info_tuple> const tl_info_r = "INFO(source, function, line)";
 bp::rule<class tl_no_match_r, tl_no_match_tuple> const tl_no_match_r = "NO_MATCH(date, git_hash)";
 bp::rule<class tl_footer> const tl_footer = "'TL_END' 'TL' 'INFO' 'NO_MATCH' etc";
@@ -320,12 +339,14 @@ auto const tl_key_r_def =
 		>> '('
 		> quoted_string > ',' > nullable_quoted_string
 		> ')';
-
+auto const tl_comment_r_def =
+	"COMMENT"_l >> '(' > quoted_string > ')';
 auto const tl_info_r_def =
 	"INFO"_l
 	>> '('
 		> quoted_string > ','
 		> quoted_string > ','
+		> bp::int_ > ','
 		> bp::int_
 	> ')';
 
@@ -337,6 +358,7 @@ auto const tl_footer_def= "TL_END"_l > '(' > ')' > bp::eoi;
 auto const root_p =
 	header_lang[header_action]
 	> *( tl_key_r[key_action]
+		| tl_comment_r[comment_action]
 		| tl_info_r[info_action]
 		| tl_no_match_r[no_match_action]
 		) > tl_footer;
@@ -350,6 +372,7 @@ BOOST_PARSER_DEFINE_RULES(
 	string_enum,
 	header_lang,
 	tl_key_r,
+	tl_comment_r,
 	tl_info_r,
 	tl_no_match_r,
 	tl_footer);

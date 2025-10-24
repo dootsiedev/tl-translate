@@ -21,9 +21,10 @@ struct tl_header
 
 struct tl_info
 {
-	std::string source_file;
 	std::string function;
+	std::string source_file;
 	int line;
+	int column;
 };
 
 struct tl_no_match
@@ -77,6 +78,11 @@ public:
 
 	virtual TL_RESULT on_header(tl_header& header) = 0;
 	virtual TL_RESULT on_translation(std::string& key, std::optional<std::string>& value) = 0;
+	virtual TL_RESULT on_comment(std::string& comment)
+	{
+		(void)comment;
+		return TL_RESULT::SUCCESS;
+	}
 
 	// not used by the translation context
 	virtual TL_RESULT on_info(tl_info& info)

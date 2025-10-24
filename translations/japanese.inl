@@ -1,12 +1,12 @@
 TL_START(Japanese, JP, "日本語", "2025", "(no git hash)")
 // comments work!
-INFO("main.cpp","just to test", 0)
+INFO("func","main.cpp", 0,0)
 TL("test!\n", "てすと！\n")
 
 // unresolved means that the string extractor did not match with any pre newly added strings.
 // the string extractor can be run with a flag that deletes all unresolved strings.
 //UNRESOLVED("2025", "(no git hash)")
-INFO("main.cpp","just to test", 1)
+INFO("func","main.cpp", 0,0)
 TL("test %s!\n", "てすと %s！\n")
 
 // MAYBE means that this string did not match perfectly, but it passed the basic tests
@@ -17,7 +17,7 @@ TL("test %s!\n", "てすと %s！\n")
 // if it is correct, just delete it in the template.inl file 
 // (and the next time you run the string extractor, it should erase the propogated MAYBE for all translation files)
 //MAYBE("original string!", "2025", "(no git hash)")
-INFO("main.cpp","/code/main.cpp", 2)
+INFO("func","main.cpp", 0,0)
 TL("test\nnewline: %s!\n", "てすと\nにゅうらいおん: %s！\n")
 
 TL_END()
