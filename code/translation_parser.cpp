@@ -224,9 +224,10 @@ auto const info_action = [](auto& ctx) {
 	globals.tl_parser_ctx = &wrap;
 
 	tl_info entry;
-	entry.source_file = to_utf8(std::get<(int)tl_info_get::source_file>(info));
 	entry.function = to_utf8(std::get<(int)tl_info_get::function>(info));
+	entry.source_file = to_utf8(std::get<(int)tl_info_get::source_file>(info));
 	entry.line = std::get<(int)tl_info_get::line>(info);
+	entry.column = std::get<(int)tl_info_get::column>(info);
 
 	switch(globals.on_info(entry))
 	{

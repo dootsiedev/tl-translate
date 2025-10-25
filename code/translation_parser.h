@@ -78,13 +78,18 @@ public:
 
 	virtual TL_RESULT on_header(tl_header& header) = 0;
 	virtual TL_RESULT on_translation(std::string& key, std::optional<std::string>& value) = 0;
+
+	// not used by the translation context
+	// NOTE: I would put this into a macro if I could make the compile time faster...
+	//  the problem is that I don't think it would reduce compile time...
+	//  but parsing should be faster because I avoid utf8 conversion
+	//  (but it would be EVEN faster if I used a string_view and disable utf8 conversion)
 	virtual TL_RESULT on_comment(std::string& comment)
 	{
 		(void)comment;
 		return TL_RESULT::SUCCESS;
 	}
 
-	// not used by the translation context
 	virtual TL_RESULT on_info(tl_info& info)
 	{
 		(void)info;
