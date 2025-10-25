@@ -76,7 +76,7 @@
 
 // for parser | bp::as_utf8, it makes the column location unicode aware
 // (but the terminal needs a fixed width font, and windows default terminals wont print it utf8)
-//#include <boost/parser/transcode_view.hpp>
+// #include <boost/parser/transcode_view.hpp>
 
 #include "util/utf8_stuff.h"
 
@@ -88,7 +88,6 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Woverloaded-shift-op-parentheses"
 #endif
-
 
 // This is leftover from when I was using u32string for bp::write_formatted_message
 // I want to support string_view (C++20) but this won't apply to enums ATM
@@ -364,7 +363,6 @@ BOOST_PARSER_DEFINE_RULES(
 
 struct logging_error_handler
 {
-
 	explicit logging_error_handler(tl_parse_observer& o_, const char* filename_)
 	: o(o_)
 	, filename(filename_)
@@ -472,7 +470,7 @@ struct logging_error_handler
 	{
 		std::ostringstream oss;
 
-		ASSERT(*(message.data()+message.size()) == '\0');
+		ASSERT(*(message.data() + message.size()) == '\0');
 
 		std::string result = print_formatted_error(bp::_begin(context), bp::_end(context), it, message.data());
 		switch(kind)
@@ -504,7 +502,7 @@ struct logging_error_handler
 bool parse_translation_file(
 	tl_parse_observer& o, std::string_view file_contents, const char* path_name)
 {
-	// for sanity mid-parse utf8 errors just validate the whole file
+	// validate utf8 upfront, if I get an error while parsing I will know it's my fault...
 #ifndef NDEBUG
 	auto str_cur = file_contents.begin();
 	auto str_end = file_contents.end();
