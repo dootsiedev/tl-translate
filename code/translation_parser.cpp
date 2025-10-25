@@ -369,14 +369,15 @@ struct logging_error_handler
 	: o(o_)
 	, filename(filename_)
 	{
+		ASSERT(filename != NULL);
 	}
 
 	template<class Iter>
 	std::string print_formatted_error(Iter first, Iter last, Iter eiter, const char* message) const
 	{
-		ASSERT(first < last);
-		ASSERT(first < eiter);
-		ASSERT(eiter < last);
+		ASSERT(first <= last);
+		ASSERT(first <= eiter);
+		ASSERT(eiter <= last);
 		ASSERT(message != NULL);
 
 		int line_number = 1;
@@ -385,16 +386,16 @@ struct logging_error_handler
 
 		auto cur = first;
 		auto newline_start = first;
-		for(; cur!=eiter && cur!=last; ++cur)
+		for(; cur != eiter; ++cur)
 		{
 			if(*cur == '\n')
 			{
 				line_number++;
-				newline_start = cur+1;
+				newline_start = cur + 1;
 			}
 		}
 
-		for(; cur!=last; ++cur)
+		for(; cur != last; ++cur)
 		{
 			// the \r goes before the newline, which is why I ignore it above.
 			if(*cur == '\n' || *cur == '\r')
@@ -402,11 +403,10 @@ struct logging_error_handler
 				break;
 			}
 		}
-		underlying = std::string(newline_start,cur);
+		underlying = std::string(newline_start, cur);
 
-		// TODO: I don't feel like this code is safe. I kind of just brute forced it.
 		std::string result;
-		if(newline_start != eiter)
+		if(newline_start < eiter)
 		{
 			cur = newline_start;
 			utf8::internal::utf_error err_code;
@@ -423,13 +423,13 @@ struct logging_error_handler
 					result += utf8cpp_get_error(err_code);
 					result += '\n';
 				}
-			} while(err_code == utf8::internal::UTF8_OK && cur != eiter && cur != last);
+			} while(err_code == utf8::internal::UTF8_OK && cur < eiter);
 		}
 
 		str_asprintf(
 			result,
 			"%s:%d:%d: %s here%s\n"
-			"%s\n%*s^",
+			"%s\n%*s^\n",
 			filename,
 			line_number,
 			column_number,
@@ -471,6 +471,8 @@ struct logging_error_handler
 		bp::diagnostic_kind kind, std::string_view message, Context const& context, Iter it) const
 	{
 		std::ostringstream oss;
+
+		ASSERT(*(message.data()+message.size()) == '\0');
 
 		std::string result = print_formatted_error(bp::_begin(context), bp::_end(context), it, message.data());
 		switch(kind)
