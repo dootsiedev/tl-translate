@@ -503,6 +503,8 @@ add_executable(${PROJECT_NAME}
 
         code/util/fnv1a_hash.h
         code/util/string_tools.h
+        code/util/utf8_stuff.h
+        code/util/utf8_stuff.cpp
 
         code/datastructures/BS_stream.h
         code/datastructures/BS_stream.cpp
@@ -511,16 +513,19 @@ add_executable(${PROJECT_NAME}
         code/datastructures/event_listener_observer.cpp
 )
 
+#uhh... this should be part of MY_COMPILER_FLAGS, but I chose not...
+add_library(MY_OPTIONS_FLAGS INTERFACE)
+
 
 # flags to make the core library work as a terminal application.
-target_compile_definitions(${PROJECT_NAME} PRIVATE DISABLE_SDL DISABLE_CONSOLE DISABLE_CUSTOM_ASSERT)
+target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE DISABLE_SDL DISABLE_CONSOLE DISABLE_CUSTOM_ASSERT)
 
 
 # this should be easier to test first.
 option(TL_COMPILE_TIME_TRANSLATION "embed translations into the code, does not require boost parser" ON)
 
 if(TL_COMPILE_TIME_TRANSLATION)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE TL_COMPILE_TIME_TRANSLATION)
+    target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE TL_COMPILE_TIME_TRANSLATION)
 else()
     # boost spirit takes up 500mb by default, and that's just for windows-x64...
     #find_package(Boost CONFIG REQUIRED COMPONENTS spirit)
@@ -529,7 +534,7 @@ else()
     # boost parser works standalone (but needs boost hana for structs, I use tuples atm)
     # but boost parser needs C++ exceptions (ew).
     # I don't know why but debug clang (msvc) will crash on exceptions (invalid access, but reldeb works)
-    target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/parser/include")
+    target_include_directories(MY_OPTIONS_FLAGS SYSTEM INTERFACE "${CMAKE_SOURCE_DIR}/parser/include")
 
     # non virtual member function call, something with std::any casting.
     # ideally, I could try to compile ONLY the parser with this flag.
@@ -544,13 +549,13 @@ endif()
 option(TL_COMPILE_TIME_ASSERTS "check that all _T(\"\") strings are included in translations/english_ref.inl during compile time, does not propagate to other languages ATM" OFF)
 
 if(TL_COMPILE_TIME_ASSERTS)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE TL_COMPILE_TIME_ASSERTS)
+    target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE TL_COMPILE_TIME_ASSERTS)
 endif()
 
 # this gets rid of the assert popup, so instead it just uses plain assert()
 #option(DISABLE_CUSTOM_ASSERT "by default a dialog window opens, this will use normal assert()" OFF)
 #if(DISABLE_CUSTOM_ASSERT)
-#    target_compile_definitions(${PROJECT_NAME} PRIVATE DISABLE_CUSTOM_ASSERT)
+#    target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE DISABLE_CUSTOM_ASSERT)
 #endif()
 
 option(FORCE_UNSAFE_ASSERT "replace assert with [[assume(x)]] which will lead to optimizations and UB" OFF)
@@ -558,29 +563,27 @@ if(FORCE_UNSAFE_ASSERT)
     if(NOT DISABLE_CUSTOM_ASSERT)
         message(ERROR "you must enable DISABLE_CUSTOM_ASSERT with FORCE_UNSAFE_ASSERT")
     endif()
-    target_compile_definitions(${PROJECT_NAME} PRIVATE FORCE_UNSAFE_ASSERT)
+    target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE FORCE_UNSAFE_ASSERT)
 endif()
 
 # I don't think this actually helps much
 option(USE_PCH "testing precompiled header global_pch.h" OFF)
 if(USE_PCH)
-    target_precompile_headers(${PROJECT_NAME} PRIVATE "code/core/global_pch.h")
+    target_precompile_headers(MY_OPTIONS_FLAGS INTERFACE "code/core/global_pch.h")
 endif()
 
-target_link_libraries(${PROJECT_NAME} ALL_SANITIZERS)
-target_compile_options(${PROJECT_NAME} PRIVATE ${MY_COMPILER_FLAGS})
 
 
 #enable this just in case (clang on linux doesn't default to PIE)
 option(USE_PIE "Enables ASLR in case it's off" ${USE_SIMPLE_HARDEN})
 include(CheckPIESupported)
 check_pie_supported()
-set_property(TARGET ${PROJECT_NAME} PROPERTY POSITION_INDEPENDENT_CODE ${USE_PIE})
+set_property(TARGET MY_OPTIONS_FLAGS PROPERTY POSITION_INDEPENDENT_CODE ${USE_PIE})
 
 if(NOT WIN32 AND USE_SIMPLE_HARDEN)
 # -Wl,-z,relro,-z,now
 # OR use -fno-plt which is more aggressive?
-    target_link_options(${PROJECT_NAME} INTERFACE -Wl,-z,relro,-z,now)
+    target_link_options(MY_OPTIONS_FLAGS INTERFACE -Wl,-z,relro,-z,now)
 endif()
 
 #
@@ -598,19 +601,19 @@ if(USE_CPP_STACKTRACE)
     if(NOT USE_CPP23)
         message(warning "USE_CPP23 is required.")
     endif()
-    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_CPP_STACKTRACE)
+    target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE USE_CPP_STACKTRACE)
 endif()
 
 # this technically should work with mingw, but it won't print non-mingw symbols which is bad
 # maybe vcpkg could work, I have not tried.
 option(USE_LIBBACKTRACE "to print stack traces" OFF)
 if(USE_LIBBACKTRACE)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_LIBBACKTRACE)
+    target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE USE_LIBBACKTRACE)
     #libbacktrace doesn't have a cmake thing
-    target_link_libraries(${PROJECT_NAME} "-lbacktrace")
+    target_link_libraries(MY_OPTIONS_FLAGS "-lbacktrace")
 
     #need this to print the module name with libbacktrace
-    target_link_libraries(${PROJECT_NAME} "-ldl")
+    target_link_libraries(MY_OPTIONS_FLAGS "-ldl")
 endif()
 
 option(USE_WIN32_DEBUG_INFO "to print stack traces, requires dbghelp.dll to be supplied" OFF)
@@ -618,7 +621,7 @@ if(USE_WIN32_DEBUG_INFO)
     # I found a dbghelp package in vcpkg, but it seems impossible to get working because it doesn't have a .cmake file to load from.
     # you need to install windows debugging tools (comes with the old windbg) which includes dbghelp.dll globally.
     # I load dbghelp.dll dynamically during runtime when the stacktrace is requested.
-    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_WIN32_DEBUG_INFO)
+    target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE USE_WIN32_DEBUG_INFO)
 endif()
 
 # off by default because it's annoying for debugging,
@@ -626,15 +629,20 @@ endif()
 # (and also ATM gltest does not use threads so this isn't used)
 option(USE_WIN32_THREAD "I can use this to implement a watchdog" OFF)
 if(USE_WIN32_THREAD)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_WIN32_THREAD)
+    target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE USE_WIN32_THREAD)
 endif()
 
 # USE_PTHREAD just raises a trap within the timed out thread,
 # unlike windows it will not print a stacktrace, it's technically possible with a signal handler, but it's tricky.
 option(USE_PTHREAD "I can use this to implement a watchdog" OFF)
 if(USE_PTHREAD)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_WIN32_THREAD)
+    target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE USE_WIN32_THREAD)
 endif()
+
+
+target_link_libraries(${PROJECT_NAME} ALL_SANITIZERS MY_OPTIONS_FLAGS)
+target_compile_options(${PROJECT_NAME} PRIVATE ${MY_COMPILER_FLAGS})
+
 
 #
 # install
@@ -798,4 +806,25 @@ if(PORTABLE OR WIN32)
     ]==])
     endif()
 
+endif()
+
+
+#
+# tests
+#
+option(BUILD_TESTS "ATM only for the merge-strings tool, I plan on using extract-strings but it's separate because it's LLVM..." OFF)
+if(BUILD_TESTS)
+    # I want to fetchContent this just for fun, but I don't know if fetchcontent will let me set the build flags.
+    add_subdirectory(tools/merge-strings)
+
+    target_include_directories(merge-strings SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/parser/include")
+    target_link_libraries(merge-strings ALL_SANITIZERS MY_OPTIONS_FLAGS)
+    target_compile_options(merge-strings PRIVATE ${MY_COMPILER_FLAGS})
+
+
+    enable_testing() # Enable CTest
+    add_test(NAME MyTest COMMAND merge-strings
+            +cv_merge_from ${CMAKE_INSTALL_PREFIX}/${EXECUTABLE_INSTALLATION_PATH}/translations/english_ref.inl
+            +cv_merge_to ${CMAKE_INSTALL_PREFIX}/${EXECUTABLE_INSTALLATION_PATH}/translations/japanese.inl
+            +cv_merge_out test.inl)
 endif()

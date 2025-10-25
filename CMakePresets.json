@@ -13,7 +13,8 @@
         "USE_CPP_STACKTRACE": true,
         "USE_WIN32_DEBUG_INFO": true,
         "TL_COMPILE_TIME_TRANSLATION": false,
-        "TL_COMPILE_TIME_ASSERTS": true
+        "TL_COMPILE_TIME_ASSERTS": true,
+        "BUILD_TESTS": true
       }
     },
     {

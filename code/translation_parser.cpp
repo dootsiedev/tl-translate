@@ -54,8 +54,6 @@
 //
 //
 
-typedef std::string my_string_type;
-
 #ifndef TL_COMPILE_TIME_TRANSLATION
 
 #include "translation_parser.h"
@@ -78,7 +76,9 @@ typedef std::string my_string_type;
 
 // for parser | bp::as_utf8, it makes the column location unicode aware
 // (but the terminal needs a fixed width font, and windows default terminals wont print it utf8)
-#include <boost/parser/transcode_view.hpp>
+//#include <boost/parser/transcode_view.hpp>
+
+#include "util/utf8_stuff.h"
 
 #include <sstream>
 #include <ranges>
@@ -88,6 +88,11 @@ typedef std::string my_string_type;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Woverloaded-shift-op-parentheses"
 #endif
+
+
+// This is leftover from when I was using u32string for bp::write_formatted_message
+// I want to support string_view (C++20) but this won't apply to enums ATM
+typedef std::string my_string_type;
 
 namespace bp = boost::parser;
 namespace tl_parser
@@ -159,27 +164,6 @@ public:
 
 using namespace bp::literals;
 
-
-static my_string_type& to_utf8(my_string_type& str)
-{
-	return str;
-}
-#if 0
-// this will throw exceptions, maybe replace it with utfcpp (internal functions)
-static std::string to_utf8(std::u32string& str)
-{
-	std::string out;
-	out.reserve(str.size());
-	for(auto c : str | bp::as_utf8)
-	{
-		out.push_back(c);
-	}
-	// needs C++20
-	// std::ranges::copy(str | bp::as_utf8, std::back_inserter(out));
-	return out;
-};
-#endif
-
 auto const header_action = [](auto& ctx) {
 	auto& globals = bp::_globals(ctx);
 	tl_header_tuple& header = bp::_attr(ctx);
@@ -190,9 +174,9 @@ auto const header_action = [](auto& ctx) {
 	tl_header entry;
 	entry.long_name = std::get<(int)tl_header_get::long_name>(header);
 	entry.short_name = std::get<(int)tl_header_get::short_name>(header);
-	entry.native_name = to_utf8(std::get<(int)tl_header_get::native_name>(header));
-	entry.date = to_utf8(std::get<(int)tl_header_get::date>(header));
-	entry.git_hash = to_utf8(std::get<(int)tl_header_get::git_hash>(header));
+	entry.native_name = std::get<(int)tl_header_get::native_name>(header);
+	entry.date = std::get<(int)tl_header_get::date>(header);
+	entry.git_hash = std::get<(int)tl_header_get::git_hash>(header);
 
 	switch(globals.on_header(entry))
 	{
@@ -209,14 +193,7 @@ auto const key_action = [](auto& ctx) {
 	report_wrapper wrap(ctx);
 	globals.tl_parser_ctx = &wrap;
 
-	std::string key = to_utf8(std::get<0>(info));
-	std::optional<std::string> value;
-	if(std::get<1>(info).has_value())
-	{
-		value = to_utf8(*std::get<1>(info));
-	}
-
-	switch(globals.on_translation(key, value))
+	switch(globals.on_translation(std::get<0>(info), std::get<1>(info)))
 	{
 	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
@@ -233,8 +210,8 @@ auto const info_action = [](auto& ctx) {
 	globals.tl_parser_ctx = &wrap;
 
 	tl_info entry;
-	entry.function = to_utf8(std::get<(int)tl_info_get::function>(info));
-	entry.source_file = to_utf8(std::get<(int)tl_info_get::source_file>(info));
+	entry.function = std::get<(int)tl_info_get::function>(info);
+	entry.source_file = std::get<(int)tl_info_get::source_file>(info);
 	entry.line = std::get<(int)tl_info_get::line>(info);
 	entry.column = std::get<(int)tl_info_get::column>(info);
 
@@ -254,8 +231,8 @@ auto const no_match_action = [](auto& ctx) {
 	globals.tl_parser_ctx = &wrap;
 
 	tl_no_match entry;
-	entry.date = to_utf8(std::get<(int)tl_no_match_get::date>(no_match_info));
-	entry.git_hash = to_utf8(std::get<(int)tl_no_match_get::git_hash>(no_match_info));
+	entry.date = std::get<(int)tl_no_match_get::date>(no_match_info);
+	entry.git_hash = std::get<(int)tl_no_match_get::git_hash>(no_match_info);
 
 	switch(globals.on_no_match(entry))
 	{
@@ -272,9 +249,7 @@ auto const comment_action = [](auto& ctx) {
 	report_wrapper wrap(ctx);
 	globals.tl_parser_ctx = &wrap;
 
-	auto comment = to_utf8(bp::_attr(ctx));
-
-	switch(globals.on_comment(comment))
+	switch(globals.on_comment(bp::_attr(ctx)))
 	{
 	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
@@ -387,7 +362,6 @@ BOOST_PARSER_DEFINE_RULES(
 	tl_no_match_r,
 	tl_footer);
 
-#include "3rdParty/utf8/core.hpp"
 struct logging_error_handler
 {
 
@@ -400,6 +374,11 @@ struct logging_error_handler
 	template<class Iter>
 	std::string print_formatted_error(Iter first, Iter last, Iter eiter, const char* message) const
 	{
+		ASSERT(first < last);
+		ASSERT(first < eiter);
+		ASSERT(eiter < last);
+		ASSERT(message != NULL);
+
 		int line_number = 1;
 		int column_number = 0;
 		std::string underlying;
@@ -425,26 +404,28 @@ struct logging_error_handler
 		}
 		underlying = std::string(newline_start,cur);
 
-		// TODO: I don't know if I need to check if newline_start != last
+		// TODO: I don't feel like this code is safe. I kind of just brute forced it.
+		std::string result;
 		if(newline_start != eiter)
 		{
 			cur = newline_start;
-			utf8::internal::utf_error result;
+			utf8::internal::utf_error err_code;
 			do
 			{
 				uint32_t cp;
-				result = utf8::internal::validate_next(cur, eiter, cp);
-				switch(result)
+				err_code = utf8::internal::validate_next(cur, eiter, cp);
+				switch(err_code)
 				{
 				case utf8::internal::UTF8_OK: column_number++; break;
 				default:
-					// TODO: print the actual error.
-					return "utf8 error!\n";
+					// I have not tested how this looks.
+					result = "utf8 error: ";
+					result += utf8cpp_get_error(err_code);
+					result += '\n';
 				}
-			} while(result == utf8::internal::UTF8_OK && cur != eiter && cur != last);
+			} while(err_code == utf8::internal::UTF8_OK && cur != eiter && cur != last);
 		}
 
-		std::string result;
 		str_asprintf(
 			result,
 			"%s:%d:%d: %s here%s\n"
@@ -521,6 +502,29 @@ struct logging_error_handler
 bool parse_translation_file(
 	tl_parse_observer& o, std::string_view file_contents, const char* path_name)
 {
+	// for sanity mid-parse utf8 errors just validate the whole file
+#ifndef NDEBUG
+	auto str_cur = file_contents.begin();
+	auto str_end = file_contents.end();
+
+	int line_num = 1;
+	while(str_cur != str_end)
+	{
+		uint32_t codepoint;
+		utf8::internal::utf_error err_code =
+			utf8::internal::validate_next(str_cur, str_end, codepoint);
+		if(err_code != utf8::internal::UTF8_OK)
+		{
+			serrf("error: %s:%d bad utf8: %s\n", path_name, line_num, utf8cpp_get_error(err_code));
+			return false;
+		}
+		if(codepoint == '\n')
+		{
+			line_num++;
+		}
+	}
+#endif
+
 	tl_parser::logging_error_handler err(o, path_name);
 
 	auto const parse = bp::with_error_handler(bp::with_globals(tl_parser::root_p, o), err);
@@ -528,7 +532,7 @@ bool parse_translation_file(
 	// NOTE: I could enable tracing, but it generates thousands of lines, bp::trace::on);
 	if(!bp::parse(file_contents, parse, tl_parser::skipper))
 	{
-		// I use bp::eps > at the start so that I get an error for a empty file.
+		// I use bp::eps > at the start so that I get an error in an empty file.
 		CHECK(parse.error_handler_.errors_printed && "expected errors to be printed");
 		return false;
 	}
