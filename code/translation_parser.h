@@ -106,4 +106,4 @@ public:
 
 // testing.
 bool parse_translation_file(
-	tl_parse_observer& o, std::string_view file_contents, std::string_view path_name);
+	tl_parse_observer& o, std::string_view file_contents, const char* path_name);

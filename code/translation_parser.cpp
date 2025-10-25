@@ -54,6 +54,8 @@
 //
 //
 
+typedef std::string my_string_type;
+
 #ifndef TL_COMPILE_TIME_TRANSLATION
 
 #include "translation_parser.h"
@@ -104,7 +106,7 @@ enum class tl_header_get
 	git_hash
 };
 
-typedef std::tuple<std::string, std::string, std::u32string, std::u32string, std::u32string>
+typedef std::tuple<std::string, std::string, my_string_type, my_string_type, my_string_type>
 	tl_header_tuple;
 
 enum class tl_info_get
@@ -114,14 +116,14 @@ enum class tl_info_get
 	line,
 	column
 };
-typedef std::tuple<std::u32string, std::u32string, int, int> tl_info_tuple;
+typedef std::tuple<my_string_type, my_string_type, int, int> tl_info_tuple;
 
 enum class tl_no_match_get
 {
 	date,
 	git_hash
 };
-typedef std::tuple<std::u32string, std::u32string> tl_no_match_tuple;
+typedef std::tuple<my_string_type, my_string_type> tl_no_match_tuple;
 
 #if 0
 enum class tl_maybe_get
@@ -157,6 +159,12 @@ public:
 
 using namespace bp::literals;
 
+
+static my_string_type& to_utf8(my_string_type& str)
+{
+	return str;
+}
+#if 0
 // this will throw exceptions, maybe replace it with utfcpp (internal functions)
 static std::string to_utf8(std::u32string& str)
 {
@@ -170,6 +178,7 @@ static std::string to_utf8(std::u32string& str)
 	// std::ranges::copy(str | bp::as_utf8, std::back_inserter(out));
 	return out;
 };
+#endif
 
 auto const header_action = [](auto& ctx) {
 	auto& globals = bp::_globals(ctx);
@@ -277,10 +286,10 @@ auto const comment_action = [](auto& ctx) {
 // TODO: make naming more consistent...
 bp::rule<class header_lang, tl_header_tuple> const header_lang =
 	"TL_START(long_name, short_name, date, git_hash)";
-bp::rule<class tl_key_r, std::tuple<std::u32string, std::optional<std::u32string>>> const tl_key_r =
+bp::rule<class tl_key_r, std::tuple<my_string_type, std::optional<my_string_type>>> const tl_key_r =
 	"TL(text, translated_text)";
 
-bp::rule<class tl_comment_r, std::u32string> const tl_comment_r = "COMMENT(text)";
+bp::rule<class tl_comment_r, my_string_type> const tl_comment_r = "COMMENT(text)";
 bp::rule<class tl_info_r, tl_info_tuple> const tl_info_r = "INFO(source, function, line)";
 bp::rule<class tl_no_match_r, tl_no_match_tuple> const tl_no_match_r = "NO_MATCH(date, git_hash)";
 bp::rule<class tl_footer> const tl_footer = "'TL_END' 'TL' 'INFO' 'NO_MATCH' etc";
@@ -293,8 +302,8 @@ bp::rule<class tl_footer> const tl_footer = "'TL_END' 'TL' 'INFO' 'NO_MATCH' etc
 bp::rule<class string_char, uint32_t> const string_char =
 	"code point (code points <= U+001F must be escaped)";
 bp::rule<class single_escaped_char, uint32_t> const single_escaped_char = "'\"', '\\', 'n', or 't'";
-bp::rule<class quoted_string, std::u32string> const quoted_string = "quoted string";
-bp::rule<class nullable_quoted_string, std::optional<std::u32string>> const nullable_quoted_string =
+bp::rule<class quoted_string, my_string_type> const quoted_string = "quoted string";
+bp::rule<class nullable_quoted_string, std::optional<my_string_type>> const nullable_quoted_string =
 	"quoted string or NULL";
 
 bp::rule<class string_enum, std::string> const string_enum = "enum";
@@ -378,12 +387,78 @@ BOOST_PARSER_DEFINE_RULES(
 	tl_no_match_r,
 	tl_footer);
 
+#include "3rdParty/utf8/core.hpp"
 struct logging_error_handler
 {
-	explicit logging_error_handler(tl_parse_observer& o_, std::string_view filename)
+
+	explicit logging_error_handler(tl_parse_observer& o_, const char* filename_)
 	: o(o_)
-	, filename_(filename)
+	, filename(filename_)
 	{
+	}
+
+	template<class Iter>
+	std::string print_formatted_error(Iter first, Iter last, Iter eiter, const char* message) const
+	{
+		int line_number = 1;
+		int column_number = 0;
+		std::string underlying;
+
+		auto cur = first;
+		auto newline_start = first;
+		for(; cur!=eiter && cur!=last; ++cur)
+		{
+			if(*cur == '\n')
+			{
+				line_number++;
+				newline_start = cur+1;
+			}
+		}
+
+		for(; cur!=last; ++cur)
+		{
+			// the \r goes before the newline, which is why I ignore it above.
+			if(*cur == '\n' || *cur == '\r')
+			{
+				break;
+			}
+		}
+		underlying = std::string(newline_start,cur);
+
+		// TODO: I don't know if I need to check if newline_start != last
+		if(newline_start != eiter)
+		{
+			cur = newline_start;
+			utf8::internal::utf_error result;
+			do
+			{
+				uint32_t cp;
+				result = utf8::internal::validate_next(cur, eiter, cp);
+				switch(result)
+				{
+				case utf8::internal::UTF8_OK: column_number++; break;
+				default:
+					// TODO: print the actual error.
+					return "utf8 error!\n";
+				}
+			} while(result == utf8::internal::UTF8_OK && cur != eiter && cur != last);
+		}
+
+		std::string result;
+		str_asprintf(
+			result,
+			"%s:%d:%d: %s here%s\n"
+			"%s\n%*s^",
+			filename,
+			line_number,
+			column_number,
+			message,
+			(cur == last) ? " (end of input)" : "",
+			underlying.c_str(),
+			column_number,
+			"");
+
+		return result;
 	}
 
 	// This is the function called by Boost.Parser after a parser fails the
@@ -399,10 +474,12 @@ struct logging_error_handler
 		operator()(Iter first, Sentinel last, bp::parse_error<Iter> const& e) const
 	{
 		errors_printed = true;
-		std::ostringstream oss;
-		// NOLINTNEXTLINE(performance-unnecessary-value-param)
-		bp::write_formatted_expectation_failure_error_message(oss, filename_, first, last, e);
-		o.on_error(oss.str().c_str());
+
+		std::string error = "error: Expected ";
+		error += e.what();
+		std::string message = print_formatted_error(first, last, e.iter, error.c_str());
+
+		o.on_error(message.c_str());
 		return bp::error_handler_result::fail;
 	}
 
@@ -413,15 +490,15 @@ struct logging_error_handler
 		bp::diagnostic_kind kind, std::string_view message, Context const& context, Iter it) const
 	{
 		std::ostringstream oss;
-		bp::write_formatted_message(
-			oss, filename_, bp::_begin(context), it, bp::_end(context), message);
+
+		std::string result = print_formatted_error(bp::_begin(context), bp::_end(context), it, message.data());
 		switch(kind)
 		{
 		case bp::diagnostic_kind::error:
-			o.on_error(oss.str().c_str());
+			o.on_error(result.c_str());
 			errors_printed = true;
 			break;
-		case bp::diagnostic_kind::warning: o.on_warning(oss.str().c_str()); break;
+		case bp::diagnostic_kind::warning: o.on_warning(result.c_str()); break;
 		}
 	}
 
@@ -436,20 +513,20 @@ struct logging_error_handler
 
 	mutable bool errors_printed = false;
 	tl_parse_observer& o;
-	std::string_view filename_;
+	const char* filename;
 };
 
 } // namespace tl_parser
 
 bool parse_translation_file(
-	tl_parse_observer& o, std::string_view file_contents, std::string_view path_name)
+	tl_parse_observer& o, std::string_view file_contents, const char* path_name)
 {
 	tl_parser::logging_error_handler err(o, path_name);
 
 	auto const parse = bp::with_error_handler(bp::with_globals(tl_parser::root_p, o), err);
 
 	// NOTE: I could enable tracing, but it generates thousands of lines, bp::trace::on);
-	if(!bp::parse(file_contents | bp::as_utf8, parse, tl_parser::skipper))
+	if(!bp::parse(file_contents, parse, tl_parser::skipper))
 	{
 		// I use bp::eps > at the start so that I get an error for a empty file.
 		CHECK(parse.error_handler_.errors_printed && "expected errors to be printed");

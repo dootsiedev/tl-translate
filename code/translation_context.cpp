@@ -298,7 +298,7 @@ bool translation_context::load_languages(const char* folder)
 #endif
 			// TODO: make a parse_translation_header for performance?
 			//  but I kind of like the idea of checking for parse errors here...
-			if(!parse_translation_file(*this, slurp_string, loading_path))
+			if(!parse_translation_file(*this, slurp_string, loading_path.c_str()))
 			{
 				return false;
 			}
@@ -403,7 +403,7 @@ bool translation_context::load_language(language_entry& lang)
 	// 0.2 - 0.05 ms on reldeb, 10ms on debug san.
 	TIMER_U t1 = timer_now();
 #endif
-	if(!parse_translation_file(*this, slurp_string, lang.translation_file))
+	if(!parse_translation_file(*this, slurp_string, lang.translation_file.c_str()))
 	{
 		// missing strings will turn into @, I would rather have english.
 		translations.clear();
