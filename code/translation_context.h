@@ -2,29 +2,25 @@
 
 #include "core/global.h"
 
-#define TL_IMPLEMENT_GET_INDEX 1
 #include "translate.h"
 
 #include <vector>
 
 #define TL_START(lang, ...) lang,
-#include "../translations/tl_begin_macro.txt"
+#include "tl_begin_macro.txt"
 enum class TL_LANG
 {
 #include "../translations/english_ref.inl"
-#include "../translations/tl_all_languages.txt"
+#include "tl_all_languages.txt"
 };
-#include "../translations/tl_end_macro.txt"
+#include "tl_end_macro.txt"
 
 #ifndef TL_COMPILE_TIME_TRANSLATION
 #include "translation_parser.h"
-#include <map>
-#endif // TL_COMPILE_TIME_TRANSLATION
-
+struct translation_context : public tl_parse_observer
+#else
 struct translation_context
-#ifndef TL_COMPILE_TIME_TRANSLATION
-: public tl_parse_observer
-#endif
+#endif // TL_COMPILE_TIME_TRANSLATION
 {
 #ifdef TL_COMPILE_TIME_TRANSLATION
 	TL_LANG current_lang = TL_LANG::English;
@@ -51,8 +47,7 @@ struct translation_context
 	// NOTE: would a fs::path be any faster?
 	std::string loading_path;
 
-	void load_index(tl_index index, std::string_view value);
-	bool check_printf_specifiers(const char* key, const char* value);
+
 
 	void on_error(const char* msg) override;
 	void on_warning(const char* msg) override;
@@ -62,30 +57,61 @@ struct translation_context
 
 	std::vector<language_entry> language_list;
 
-	// a string that contains null terminating strings.
-	// maybe I could insitu load the file,
-	// or just use an arena.
-	// I think I could also make sure that the strings are never modified by locking the memory
-	// using OS functions.
-	std::string translation_memory;
-
-	// I lookup a string based off english_ref.inl
-	// so the ID is ordered based on the location the string is in the english_ref.inl
-	// this contains the offset inside of memory.
-
-	std::vector<tl_index> translations;
-
-	// to compare with the compile time number of translations,
-	// so I don't need to loop through the vector for unloaded translations.
-	size_t num_loaded_translations = 0;
-
 	// a buffer for loading files.
 	std::string slurp_string;
 
+	struct translation_table
+	{
+		// a string that contains null terminating strings.
+		// maybe I could insitu load the file,
+		// or just use an arena.
+		// I think I could also make sure that the strings are never modified by locking the memory
+		// using OS functions.
+		std::string translation_memory;
+
+		// I lookup a string based off english_ref.inl
+		// so the ID is ordered based on the location the string is in the english_ref.inl
+		// this contains the offset inside of memory.
+
+		std::vector<tl_index> translations;
+
+		// to compare with the compile time number of translations,
+		// so I don't need to loop through the vector for unloaded translations.
+		size_t num_loaded_translations = 0;
+
+		void reset();
+
+		void set_index(tl_index index, std::string_view value);
+
 #ifdef TL_COMPILE_TIME_ASSERTS
-	const char* get_text(const char* text, tl_index index);
+		const char* get_text(const char* text, tl_index index);
 #else
-	const char* get_text(const char* text);
+		const char* get_text(const char* text);
+#endif
+
+		bool validate_translation(const char* lang_file);
+
+		// I could use CRTP or function pointers, but I like this.
+		virtual const char* get_index_key(tl_index find_index) = 0;
+		virtual tl_index get_num_translations() = 0;
+		virtual ~translation_table() = default;
+	};
+	struct text_translations : public translation_table
+	{
+		const char* get_index_key(tl_index find_index) override;
+		tl_index get_num_translations() override;
+	};
+	text_translations text_table;
+
+#ifdef TL_ENABLE_FORMAT
+	struct format_translations : public translation_table
+	{
+		const char* get_index_key(tl_index find_index) override;
+		tl_index get_num_translations() override;
+	};
+	format_translations format_table;
+
+	TL_RESULT on_format(std::string& key, std::optional<std::string>& value) override;
 #endif
 
 	bool load_languages(const char* folder);

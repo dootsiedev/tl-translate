@@ -1,0 +1,10 @@
+// complements tl_begin_macro.txt
+#undef TL_START
+#undef TL_END
+#undef TL_TEXT
+#ifdef TL_ENABLE_FORMAT
+#undef TL_FORMAT
+#endif
+#undef TL_INFO
+#undef TL_NO_MATCH
+#undef TL_MAYBE

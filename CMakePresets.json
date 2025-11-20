@@ -10,11 +10,14 @@
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/../${sourceDirName}-${presetName}-install",
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
         "USE_CPP23": false,
-        "USE_CPP_STACKTRACE": true,
+        "USE_CPP_STACKTRACE": false,
         "USE_WIN32_DEBUG_INFO": true,
         "TL_COMPILE_TIME_TRANSLATION": false,
         "TL_COMPILE_TIME_ASSERTS": true,
-        "BUILD_TESTS": true
+        "BUILD_TESTS": true,
+        "ENABLE_AI": true,
+        "AI_PYTHON_DIR": "${sourceDir}/../python_venv",
+        "AI_CACHE_DIR": "${sourceDir}/../hf_cache"
       }
     },
     {

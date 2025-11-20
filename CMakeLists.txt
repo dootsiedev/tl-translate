@@ -404,7 +404,7 @@ if(WIN32)
     option(USE_MSVC_CFG "enable /guard:cf on msvc" ${USE_SIMPLE_HARDEN})
     if(USE_MSVC_CFG)
         if(USE_CFI)
-            message(WARNING "USE_CFI overrides USE_MSVC_CFG")
+            #message(WARNING "USE_CFI overrides USE_MSVC_CFG")
         elseif(MSVC)
             target_compile_options(ALL_SANITIZERS INTERFACE /guard:cf)
             target_link_options(ALL_SANITIZERS INTERFACE /guard:cf)
@@ -472,7 +472,8 @@ endif()
 
 
 add_executable(${PROJECT_NAME}
-        #$<$<BOOL:${WIN32}>:gltest.exe.manifest resource.rc>
+        $<$<BOOL:${WIN32}>:translate.manifest>
+
         code/main.cpp
 
 		code/translate.h
@@ -500,6 +501,8 @@ add_executable(${PROJECT_NAME}
         code/core/assert.h
         code/core/assert.cpp
         code/core/breakpoint.h
+        code/core/asan_helper.h
+        code/core/asan_helper.cpp
 
         code/util/fnv1a_hash.h
         code/util/string_tools.h
@@ -520,6 +523,7 @@ add_library(MY_OPTIONS_FLAGS INTERFACE)
 # flags to make the core library work as a terminal application.
 target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE DISABLE_SDL DISABLE_CONSOLE DISABLE_CUSTOM_ASSERT)
 
+target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE TL_ENABLE_FORMAT)
 
 # this should be easier to test first.
 option(TL_COMPILE_TIME_TRANSLATION "embed translations into the code, does not require boost parser" ON)
@@ -599,7 +603,7 @@ endif()
 option(USE_CPP_STACKTRACE "use <stacktrace> to print stack traces, requires USE_CPP23" OFF)
 if(USE_CPP_STACKTRACE)
     if(NOT USE_CPP23)
-        message(warning "USE_CPP23 is required.")
+        message(WARNING "USE_CPP23 is required for USE_CPP_STACKTRACE.")
     endif()
     target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE USE_CPP_STACKTRACE)
 endif()
@@ -817,14 +821,6 @@ if(BUILD_TESTS)
     # I want to fetchContent this just for fun, but I don't know if fetchcontent will let me set the build flags.
     add_subdirectory(tools/merge-strings)
 
-    target_include_directories(merge-strings SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/parser/include")
     target_link_libraries(merge-strings ALL_SANITIZERS MY_OPTIONS_FLAGS)
     target_compile_options(merge-strings PRIVATE ${MY_COMPILER_FLAGS})
-
-
-    enable_testing() # Enable CTest
-    add_test(NAME MyTest COMMAND merge-strings
-            +cv_merge_from ${CMAKE_INSTALL_PREFIX}/${EXECUTABLE_INSTALLATION_PATH}/translations/english_ref.inl
-            +cv_merge_to ${CMAKE_INSTALL_PREFIX}/${EXECUTABLE_INSTALLATION_PATH}/translations/japanese.inl
-            +cv_merge_out test.inl)
 endif()

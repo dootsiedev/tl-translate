@@ -1,6 +1,6 @@
 // This is an independent project of an individual developer. Dear PVS-Studio, please check it.
 // PVS-Studio Static Code Analyzer for C, C++, C#, and Java: https://pvs-studio.com
-#include "core/global.h"
+
 //
 // TODO: supress ubsan unsigned overflow errors...
 // TODO: convert the utf8 to wide, and print to the win32 console on windows... (or utf8 manifest)
@@ -58,6 +58,13 @@
 
 #include "translation_parser.h"
 
+// this is a hack to avoid making this file include global.h
+// so I could include this file in a project without global.h
+
+#include "core/global.h"
+
+#include "util/string_tools.h"
+
 // custom assert, boost parser also has BOOST_PARSER_NO_RUNTIME_ASSERTIONS
 // which uses static assert, which is better, but why is it not always enabled?
 // can parser parse in consteval? does that mean I can replace my macros?
@@ -92,6 +99,93 @@
 // This is leftover from when I was using u32string for bp::write_formatted_message
 // I want to support string_view (C++20) but this won't apply to enums ATM
 typedef std::string my_string_type;
+
+#ifdef TL_ENABLE_FORMAT
+bool tl_parse_state::check_printf_specifiers(const char* key, const char* value)
+{
+	// count the number, so I can print it.
+	int key_count = 0;
+	int value_count = 0;
+	const char* found_key = key;
+	const char* found_value = value;
+	do
+	{
+		if(found_key != nullptr) found_key = strchr(found_key, '%');
+		if(found_value != nullptr) found_value = strchr(found_value, '%');
+		if(found_key != nullptr && found_value != nullptr)
+		{
+			switch(found_key[1])
+			{
+			case '%':
+			case 'f':
+			case 'F':
+			case 'g':
+			case 'G':
+			case 'e':
+			case 'E':
+				// above are all floats, I want to allow mixing, but it does not matter.
+			case 'd':
+			case 'u':
+			case 's':
+			case 'c':
+			case 'x':
+			case 'X':
+			case 'p':
+				if(found_key[1] != found_value[1])
+				{
+					std::string str;
+					str_asprintf(
+						str,
+						"mismatching %% format specifier! (%%%c != %%%c)\n",
+						found_key[1],
+						found_value[1]);
+					report_error(str.c_str());
+					return false;
+				}
+				break;
+			default: {
+				// this is a warning because this is unreachable,
+				// if you change the specifier it will not match,
+				// if you change the key, it will not find the translation.
+				std::string str;
+				str_asprintf(str, "unknown key %% format specifier! (%%%c)\n", found_key[1]);
+				report_warning(str.c_str());
+			}
+			}
+		}
+
+		if(found_key != nullptr)
+		{
+			found_key++;
+			if(*(found_key) == '%')
+			{
+				found_key++;
+			}
+			key_count++;
+		}
+		if(found_value != nullptr)
+		{
+			found_value++;
+			if(*(found_value) == '%')
+			{
+				found_value++;
+			}
+			value_count++;
+		}
+	} while(found_key != nullptr || found_value != nullptr);
+
+	if(key_count != value_count)
+	{
+		std::string str;
+		str_asprintf(
+			str, "mismatching %% format specifier count! (%d != %d)\n", key_count, value_count);
+		report_error(str.c_str());
+		return false;
+	}
+
+	return true;
+}
+#endif
 
 namespace bp = boost::parser;
 namespace tl_parser
@@ -161,6 +255,7 @@ public:
 	}
 };
 
+
 using namespace bp::literals;
 
 auto const header_action = [](auto& ctx) {
@@ -200,6 +295,23 @@ auto const key_action = [](auto& ctx) {
 	}
 	globals.tl_parser_ctx = nullptr;
 };
+#ifdef TL_ENABLE_FORMAT
+auto const format_action = [](auto& ctx) {
+	auto& globals = bp::_globals(ctx);
+	auto& info = bp::_attr(ctx);
+
+	report_wrapper wrap(ctx);
+	globals.tl_parser_ctx = &wrap;
+
+	switch(globals.on_format(std::get<0>(info), std::get<1>(info)))
+	{
+	case TL_RESULT::SUCCESS:
+	case TL_RESULT::WARNING: break;
+	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
+	}
+	globals.tl_parser_ctx = nullptr;
+};
+#endif
 
 auto const info_action = [](auto& ctx) {
 	auto& globals = bp::_globals(ctx);
@@ -261,12 +373,16 @@ auto const comment_action = [](auto& ctx) {
 bp::rule<class header_lang, tl_header_tuple> const header_lang =
 	"TL_START(long_name, short_name, date, git_hash)";
 bp::rule<class tl_key_r, std::tuple<my_string_type, std::optional<my_string_type>>> const tl_key_r =
-	"TL(text, translated_text)";
+	"TL_TEXT(text, translated_text)";
+#ifdef TL_ENABLE_FORMAT
+bp::rule<class tl_format_r, std::tuple<my_string_type, std::optional<my_string_type>>> const tl_format_r =
+	"TL_FORMAT(text, translated_text)";
+#endif
 
-bp::rule<class tl_comment_r, my_string_type> const tl_comment_r = "COMMENT(text)";
-bp::rule<class tl_info_r, tl_info_tuple> const tl_info_r = "INFO(source, function, line)";
-bp::rule<class tl_no_match_r, tl_no_match_tuple> const tl_no_match_r = "NO_MATCH(date, git_hash)";
-bp::rule<class tl_footer> const tl_footer = "'TL_END' 'TL' 'INFO' 'NO_MATCH' etc";
+bp::rule<class tl_comment_r, my_string_type> const tl_comment_r = "TL_COMMENT(text)";
+bp::rule<class tl_info_r, tl_info_tuple> const tl_info_r = "TL_INFO(source, function, line)";
+bp::rule<class tl_no_match_r, tl_no_match_tuple> const tl_no_match_r = "TL_NO_MATCH(date, git_hash)";
+bp::rule<class tl_footer> const tl_footer = "'TL_END' 'TL_TEXT' 'TL_INFO' 'TL_NO_MATCH' etc";
 
 // The json example uses a utf32 transcode, but when parsing unicode characters,
 // it tries to write unicode into ascii, and it also wont work with as_utf8,
@@ -319,14 +435,21 @@ auto const header_lang_def=
 		> ')';
 
 auto const tl_key_r_def =
-	"TL"_l
+	"TL_TEXT"_l
 		>> '('
 		> quoted_string > ',' > nullable_quoted_string
 		> ')';
+#ifdef TL_ENABLE_FORMAT
+auto const tl_format_r_def =
+	"TL_FORMAT"_l
+		>> '('
+		> quoted_string > ',' > nullable_quoted_string
+		> ')';
+#endif
 auto const tl_comment_r_def =
-	"COMMENT"_l >> '(' > quoted_string > ')';
+	"TL_COMMENT"_l >> '(' > quoted_string > ')';
 auto const tl_info_r_def =
-	"INFO"_l
+	"TL_INFO"_l
 	>> '('
 		> quoted_string > ','
 		> quoted_string > ','
@@ -335,13 +458,16 @@ auto const tl_info_r_def =
 	> ')';
 
 auto const tl_no_match_r_def =
-	"NO_MATCH"_l >> '(' > quoted_string > ',' > quoted_string > ')';
+	"TL_NO_MATCH"_l >> '(' > quoted_string > ',' > quoted_string > ')';
 
 auto const tl_footer_def= "TL_END"_l > '(' > ')' > bp::eoi;
 
 auto const root_p =
 	header_lang[header_action]
 	> *( tl_key_r[key_action]
+#ifdef TL_ENABLE_FORMAT
+		| tl_format_r[format_action]
+#endif
 		| tl_comment_r[comment_action]
 		| tl_info_r[info_action]
 		| tl_no_match_r[no_match_action]
@@ -360,6 +486,10 @@ BOOST_PARSER_DEFINE_RULES(
 	tl_info_r,
 	tl_no_match_r,
 	tl_footer);
+
+#ifdef TL_ENABLE_FORMAT
+BOOST_PARSER_DEFINE_RULES(tl_format_r);
+#endif
 
 struct logging_error_handler
 {
@@ -427,7 +557,8 @@ struct logging_error_handler
 		str_asprintf(
 			result,
 			"%s:%d:%d: %s here%s\n"
-			"%s\n%*s^\n",
+			"%s\n"
+			"%*s^\n",
 			filename,
 			line_number,
 			column_number,
@@ -468,8 +599,6 @@ struct logging_error_handler
 	void diagnose(
 		bp::diagnostic_kind kind, std::string_view message, Context const& context, Iter it) const
 	{
-		std::ostringstream oss;
-
 		ASSERT(*(message.data() + message.size()) == '\0');
 
 		std::string result = print_formatted_error(bp::_begin(context), bp::_end(context), it, message.data());
@@ -533,7 +662,9 @@ bool parse_translation_file(
 	if(!bp::parse(file_contents, parse, tl_parser::skipper))
 	{
 		// I use bp::eps > at the start so that I get an error in an empty file.
-		CHECK(parse.error_handler_.errors_printed && "expected errors to be printed");
+		// This should be a CHECK because this isn't an error I care about,
+		// but MY_DISABLE_GLOBAL_DEP
+		ASSERT(parse.error_handler_.errors_printed && "expected errors to be printed");
 		return false;
 	}
 	return true;

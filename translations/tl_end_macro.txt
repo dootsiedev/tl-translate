@@ -1,7 +1,0 @@
-// complements tl_begin_macro.txt
-#undef TL_START
-#undef TL_END
-#undef TL
-#undef INFO
-#undef UNRESOLVED
-#undef MAYBE

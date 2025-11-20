@@ -1,4 +1,4 @@
-#include "../3rdparty/utf8cpp/core.hpp"
+#include "../3rdParty/utf8cpp/core.hpp"
 
 #include <string>
 

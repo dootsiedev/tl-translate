@@ -1,0 +1,4 @@
+// this is only used for TL_COMPILE_TIME_TRANSLATION
+// the translations are stored here.
+// TODO: I think I could automatically generate this file with cmake.
+#include "../translations/japanese.inl"

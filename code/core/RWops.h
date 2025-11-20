@@ -31,7 +31,9 @@ typedef std::unique_ptr<RWops> Unique_RWops;
 FILE* serr_wrapper_fopen(const char* path, const char* mode);
 
 // loads a file into a string using fopen.
-bool slurp_stdio(std::string& out, const char* path);
+bool slurp_file(std::string& out, const char* path);
+// use this if you want to open the file yourself (to check errno != ENOENT)
+bool slurp_stdio(std::string& out, FILE* file, const char* path);
 
 class RWops_Stdio : public RWops
 {

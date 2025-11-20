@@ -32,26 +32,26 @@ static const char* get_lang_long_name(TL_LANG lang)
 {
 #define TL_START(lang, ...) \
 	case TL_LANG::lang: return #lang;
-#include "../translations/tl_begin_macro.txt"
+#include "tl_begin_macro.txt"
 	switch(lang)
 	{
 #include "../translations/english_ref.inl"
-#include "../translations/tl_all_languages.txt"
+#include "tl_all_languages.txt"
 	}
-#include "../translations/tl_end_macro.txt"
+#include "tl_end_macro.txt"
 	return "<UNKNOWN LANG>";
 }
 static const char* get_lang_short_name(TL_LANG lang)
 {
 #define TL_START(lang, short_name, ...) \
 	case TL_LANG::lang: return #short_name;
-#include "../translations/tl_begin_macro.txt"
+#include "tl_begin_macro.txt"
 	switch(lang)
 	{
 #include "../translations/english_ref.inl"
-#include "../translations/tl_all_languages.txt"
+#include "tl_all_languages.txt"
 	}
-#include "../translations/tl_end_macro.txt"
+#include "tl_end_macro.txt"
 	return "<UNKNOWN LANG>";
 }
 
@@ -59,10 +59,10 @@ static int get_language_count()
 {
 	int count = 0;
 #define TL_START(lang, ...) count++;
-#include "../translations/tl_begin_macro.txt"
+#include "tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
-#include "../translations/tl_all_languages.txt"
-#include "../translations/tl_end_macro.txt"
+#include "tl_all_languages.txt"
+#include "tl_end_macro.txt"
 	return count;
 }
 
@@ -122,55 +122,87 @@ bool translation_context::init()
 #include "util/string_tools.h"
 
 // translations in a file
-static constexpr tl_index get_number_of_translations()
+// this could be constexpr, I could use a std::array instead of std::vector.
+tl_index translation_context::text_translations::get_num_translations()
 {
 	tl_index index = 0;
-#define TL(key, value) index++;
-#include "../translations/tl_begin_macro.txt"
+#define TL_TEXT(key, value) index++;
+#include "tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
-#include "../translations/tl_end_macro.txt"
+#include "tl_end_macro.txt"
 	return index;
 }
-// used as a fallback to fix missing translations during runtime.
-static constexpr const char* get_index_key(tl_index find_index)
+
+const char* translation_context::text_translations::get_index_key(tl_index find_index)
 {
 	// index 0 is uninitialized.
 	tl_index index = 1;
-#define TL(key, _)          \
+#define TL_TEXT(key, _)     \
 	if(find_index == index) \
 	{                       \
 		return key;         \
 	}                       \
 	index++;
-#include "../translations/tl_begin_macro.txt"
+#include "tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
-#include "../translations/tl_end_macro.txt"
-	return "<get_index_key:notfound>";
+#include "tl_end_macro.txt"
+	return "<text_translations::get_index_key:notfound>";
 }
 
+#ifdef TL_ENABLE_FORMAT
+tl_index translation_context::format_translations::get_num_translations()
+{
+	tl_index index = 0;
+#define TL_FORMAT(key, value) index++;
+#include "tl_begin_macro.txt"
+#include "../translations/english_ref.inl"
+#include "tl_end_macro.txt"
+	return index;
+}
+// used as a fallback to fix missing translations during runtime.
+const char* translation_context::format_translations::get_index_key(tl_index find_index)
+{
+	// index 0 is uninitialized.
+	tl_index index = 1;
+#define TL_FORMAT(key, _)     \
+	if(find_index == index) \
+	{                       \
+		return key;         \
+	}                       \
+	index++;
+#include "tl_begin_macro.txt"
+#include "../translations/english_ref.inl"
+#include "tl_end_macro.txt"
+	return "<format_translations::get_index_key:notfound>";
+}
+#endif
+
 // This only gets the english memory size, which I use as an OK estimate.
+/*
 static constexpr tl_index get_translation_memory_size()
 {
 	// index 0 is uninitialized.
 	tl_index size = 1;
-#define TL(key, value) size += std::string_view(key).size() + 1;
-#include "../translations/tl_begin_macro.txt"
+#define TL_TEXT(key, value) size += std::string_view(key).size() + 1;
+#include "tl_begin_macro.txt"
 #include "../translations/english_ref.inl"
-#include "../translations/tl_end_macro.txt"
+#include "tl_end_macro.txt"
 	return size;
 }
+*/
 
 #ifdef TL_COMPILE_TIME_ASSERTS
-const char* translation_context::get_text(const char* text, tl_index index)
+const char* translation_context::translation_table::get_text(const char* text, tl_index index)
 #else
-const char* translation_context::get_text(const char* text)
+const char* translation_context::translation_table::get_text(const char* text)
 #endif
 {
 	ASSERT(text != NULL);
 
 	// if this is english or an error occurred.
-	if(current_lang == -1)
+	if(get_translation_context().current_lang == -1)
 	{
+		// I could check if the number of translations are 0, but is that useful?
 		return text;
 	}
 #ifndef TL_COMPILE_TIME_ASSERTS
@@ -181,16 +213,15 @@ const char* translation_context::get_text(const char* text)
 	ASSERT(!translations.empty());
 	ASSERT(index <= translations.size());
 	ASSERT(translations[index] <= translation_memory.size());
+	// technically the num of translations could be zero,
+	// but the current_lang should be -1 as well
 	return &translation_memory[translations[index]];
 }
+
 bool translation_context::init()
 {
 	// reset back to english (init() can be called again to load a new language).
 	current_lang = -1;
-
-	num_loaded_translations = 0;
-	translations.clear();
-	translation_memory.clear();
 
 #ifdef NDEBUG
 	// fastpath, if english, skip everything and only use english.
@@ -201,7 +232,13 @@ bool translation_context::init()
 	}
 #endif
 
+	text_table.reset();
+#ifdef TL_ENABLE_FORMAT
+	format_table.reset();
+#endif
+
 	const char* folder_to_translations = "translations";
+	// this only loads the headers
 	if(!load_languages(folder_to_translations))
 	{
 		return false;
@@ -219,17 +256,6 @@ bool translation_context::init()
 	{
 		slogf("- %s (%s)\n", lang.long_name.c_str(), lang.short_name.c_str());
 	}
-
-	// setup
-	// index 0 must be an error.
-	translations.resize(get_number_of_translations() + 1);
-
-	// this is an estimate.
-	translation_memory.reserve(get_translation_memory_size() * 2);
-	// what to show on the error index.
-	constexpr std::string_view error_string = "<error string>\n";
-	translation_memory.insert(translation_memory.end(), error_string.begin(), error_string.end());
-	translation_memory.push_back('\0');
 
 	int lang_index = 0;
 	for(auto& lang : language_list)
@@ -253,7 +279,18 @@ bool translation_context::init()
 			ASSERT(current_lang == -1 && "this should be been set at the start of the function");
 		}
 
-		return load_language(lang);
+		if(!load_language(lang))
+		{
+			// probably should not be here, and just put it into a RAII object / defer
+			// also reset will allocate, but it shouldn't actually allocate
+			// because the size never changes
+			text_table.reset();
+#ifdef TL_ENABLE_FORMAT
+			format_table.reset();
+#endif
+			return false;
+		}
+		return true;
 	}
 	serrf("Failed to find language (%s = %s)\n", cv_language.cvar_key, cv_language->c_str());
 
@@ -285,7 +322,7 @@ bool translation_context::load_languages(const char* folder)
 
 			slurp_string.clear();
 			// copy the file into the string
-			if(!slurp_stdio(slurp_string, loading_path.c_str()))
+			if(!slurp_file(slurp_string, loading_path.c_str()))
 			{
 				return false;
 			}
@@ -394,7 +431,7 @@ bool translation_context::load_language(language_entry& lang)
 
 	slurp_string.clear();
 	// copy the file into the string
-	if(!slurp_stdio(slurp_string, lang.translation_file.c_str()))
+	if(!slurp_file(slurp_string, lang.translation_file.c_str()))
 	{
 		return false;
 	}
@@ -405,57 +442,23 @@ bool translation_context::load_language(language_entry& lang)
 #endif
 	if(!parse_translation_file(*this, slurp_string, lang.translation_file.c_str()))
 	{
-		// missing strings will turn into @, I would rather have english.
-		translations.clear();
-		num_loaded_translations = 0;
-		translation_memory.clear();
-		cv_language.cvar_revert_to_default();
 		return false;
 	}
 #ifdef CHECK_TIMER
 	TIMER_U t2 = timer_now();
 	slogf("time: %" TIMER_FMT "\n", timer_delta_ms(t1, t2));
 #endif
-	if(!CHECK(num_loaded_translations <= get_number_of_translations()))
+
+	// check and fix missing translations.
+	if(!text_table.validate_translation(lang.translation_file.c_str()))
 	{
 		return false;
 	}
-	// check and fix missing translations.
-	if(num_loaded_translations != get_number_of_translations())
+	if(!format_table.validate_translation(lang.translation_file.c_str()))
 	{
-		size_t missing_count = get_number_of_translations() - num_loaded_translations;
-		slogf(
-			"warning: missing translations (count: %zu): %s\n",
-			missing_count,
-			lang.translation_file.c_str());
-		size_t found_count = 0;
-
-		std::string escaped_string;
-		for(auto it = translations.begin(); it != translations.end(); ++it)
-		{
-			// this is the error string placeholder
-			if(it == translations.begin())
-			{
-				continue;
-			}
-			// the error offset
-			if(*it == 0)
-			{
-				auto index = std::distance(translations.begin(), it);
-				++found_count;
-				const char* key = get_index_key(index);
-
-				escaped_string.clear();
-				escape_string(escaped_string, key);
-				slogf("- \"%s\"\n", escaped_string.c_str());
-				load_index(index, key);
-			}
-		}
-		if(!CHECK(found_count == missing_count))
-		{
-			return false;
-		}
+		return false;
 	}
+
 	return true;
 }
 
@@ -472,16 +475,6 @@ void translation_context::on_warning(const char* msg)
 
 TL_RESULT translation_context::on_header(tl_header& header)
 {
-#ifdef TL_PRINT_FILE
-	slogf(
-		"lang: %s %s \"%s\"\n",
-		std::get<tl_header_get::long_name>(header).c_str(),
-		std::get<tl_header_get::short_name>(header).c_str(),
-		std::get<tl_header_get::native_name>(header).c_str());
-	slogf("date: %s\n", std::get<tl_header_get::date>(header).c_str());
-	slogf("git hash: %s\n", std::get<tl_header_get::git_hash>(header).c_str());
-#endif
-
 	if(parse_headers)
 	{
 		// I should use emplace_back and designated initializers, but I use C++17.
@@ -526,7 +519,25 @@ TL_RESULT translation_context::on_header(tl_header& header)
 	return TL_RESULT::SUCCESS;
 }
 
-void translation_context::load_index(tl_index index, std::string_view value)
+void translation_context::translation_table::reset()
+{
+	num_loaded_translations = 0;
+	translations.clear();
+	// +1 for the 0 index used for errors
+	translations.resize(get_num_translations() + 1);
+	translation_memory.clear();
+
+	// this is an estimate.
+	// (I don't use this because I should use some other pool allocator)
+	//translation_memory.reserve(get_translation_memory_size() * 2);
+
+	// what to show on the error index.
+	constexpr std::string_view error_string = "<error string>\n";
+	translation_memory.insert(translation_memory.end(), error_string.begin(), error_string.end());
+	translation_memory.push_back('\0');
+}
+
+void translation_context::translation_table::set_index(tl_index index, std::string_view value)
 {
 	tl_index offset = translation_memory.size();
 
@@ -543,112 +554,53 @@ void translation_context::load_index(tl_index index, std::string_view value)
 	ASSERT(num_loaded_translations <= translations.size());
 }
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-bool translation_context::check_printf_specifiers(const char* key, const char* value)
+bool translation_context::translation_table::validate_translation(const char* lang_file)
 {
-	// count the number, so I can print it.
-	int key_count = 0;
-	int value_count = 0;
-	const char* found_key = key;
-	const char* found_value = value;
-	do
+	if(!CHECK(num_loaded_translations <= get_num_translations()))
 	{
-		if(found_key != nullptr) found_key = strchr(found_key, '%');
-		if(found_value != nullptr) found_value = strchr(found_value, '%');
-		if(found_key != nullptr && found_value != nullptr)
-		{
-			switch(found_key[1])
-			{
-			case '%':
-			case 'f':
-			case 'F':
-			case 'g':
-			case 'G':
-			case 'e':
-			case 'E':
-				// above are all floats, I want to allow mixing, but it does not matter.
-			case 'd':
-			case 'u':
-			case 's':
-			case 'c':
-			case 'x':
-			case 'X':
-			case 'p':
-				if(found_key[1] != found_value[1])
-				{
-					std::string str;
-					str_asprintf(
-						str,
-						"mismatching %% format specifier! (%%%c != %%%c)\n",
-						found_key[1],
-						found_value[1]);
-					tl_parser_ctx->report_error(str.c_str());
-					return false;
-				}
-				break;
-			default: {
-				// this is a warning because this is unreachable,
-				// if you change the specifier it will not match,
-				// if you change the key, it will not find the translation.
-				std::string str;
-				str_asprintf(str, "unknown key %% format specifier! (%%%c)\n", found_key[1]);
-				tl_parser_ctx->report_warning(str.c_str());
-			}
-			}
-		}
-
-		if(found_key != nullptr)
-		{
-			found_key++;
-			if(*(found_key) == '%')
-			{
-				found_key++;
-			}
-			key_count++;
-		}
-		if(found_value != nullptr)
-		{
-			found_value++;
-			if(*(found_value) == '%')
-			{
-				found_value++;
-			}
-			value_count++;
-		}
-	} while(found_key != nullptr || found_value != nullptr);
-
-	if(key_count != value_count)
-	{
-		std::string str;
-		str_asprintf(
-			str, "mismatching %% format specifier count! (%d != %d)\n", key_count, value_count);
-		tl_parser_ctx->report_error(str.c_str());
 		return false;
 	}
 
+	if(num_loaded_translations != get_num_translations())
+	{
+		size_t missing_count = get_num_translations() - num_loaded_translations;
+		slogf(
+			"warning: missing translations (count: %zu): %s\n",
+			missing_count,
+			lang_file);
+		size_t found_count = 0;
+
+		std::string escaped_string;
+		for(auto it = translations.begin(); it != translations.end(); ++it)
+		{
+			// this is the error string placeholder
+			if(it == translations.begin())
+			{
+				continue;
+			}
+			// the error offset
+			if(*it == 0)
+			{
+				auto index = std::distance(translations.begin(), it);
+				++found_count;
+				const char* key = get_index_key(index);
+
+				escaped_string.clear();
+				escape_string(escaped_string, key);
+				slogf("- \"%s\"\n", escaped_string.c_str());
+				//set_index(index, key);
+			}
+		}
+		if(!CHECK(found_count == missing_count))
+		{
+			return false;
+		}
+	}
 	return true;
 }
+
 TL_RESULT translation_context::on_translation(std::string& key, std::optional<std::string>& value)
 {
-#ifdef TL_PRINT_FILE
-	if(!key.empty() && key.back() == '\n')
-	{
-		key.pop_back();
-	}
-	if(!value.empty() && value.back() == '\n')
-	{
-		value.pop_back();
-	}
-	// yep, it's possible that I have a entry that has "NULL" instead of NULL
-	// but I think NULL is universal, and want to avoid std::optional
-	// for now I want to print it.
-	// if(value == "NULL") value.clear();
-	slogf(
-		"translate: %s\n"
-		"to: %s\n",
-		key.c_str(),
-		value.c_str());
-#endif
 	if(parse_headers)
 	{
 		return TL_RESULT::SUCCESS;
@@ -662,17 +614,17 @@ TL_RESULT translation_context::on_translation(std::string& key, std::optional<st
 		tl_parser_ctx->report_warning("text does not exist");
 		return TL_RESULT::WARNING;
 	}
-	ASSERT(index < translations.size());
-	if(translations[index] != 0)
+	ASSERT(index < text_table.translations.size());
+	if(text_table.translations[index] != 0)
 	{
-		load_index(index, key);
+		text_table.set_index(index, key);
 		tl_parser_ctx->report_warning("duplicate entry");
 		return TL_RESULT::WARNING;
 	}
 
 	if(!value.has_value())
 	{
-		load_index(index, key);
+		text_table.set_index(index, key);
 		// ignore english, there is no translation.
 		if(current_lang != -1)
 		{
@@ -682,15 +634,59 @@ TL_RESULT translation_context::on_translation(std::string& key, std::optional<st
 		return TL_RESULT::SUCCESS;
 	}
 
+	text_table.set_index(index, *value);
+
+	return TL_RESULT::SUCCESS;
+}
+
+#ifdef TL_ENABLE_FORMAT
+
+TL_RESULT translation_context::on_format(std::string& key, std::optional<std::string>& value)
+{
+	// TODO: copy paste, I think I could make the format validator part of the parser?
+	if(parse_headers)
+	{
+		return TL_RESULT::SUCCESS;
+	}
+
+	// this is using compile time strings.
+	auto index = get_format_index(key);
+	if(index == 0)
+	{
+		// TODO: make tl-string extractor add NO_MATCH, and ignore it?
+		tl_parser_ctx->report_warning("format text does not exist");
+		return TL_RESULT::WARNING;
+	}
+	ASSERT(index < format_table.translations.size());
+	if(format_table.translations[index] != 0)
+	{
+		format_table.set_index(index, key);
+		tl_parser_ctx->report_warning("duplicate format entry");
+		return TL_RESULT::WARNING;
+	}
+
+	if(!value.has_value())
+	{
+		format_table.set_index(index, key);
+		// ignore english, there is no translation.
+		if(current_lang != -1)
+		{
+			tl_parser_ctx->report_warning("untranslated format entry");
+			return TL_RESULT::WARNING;
+		}
+		return TL_RESULT::SUCCESS;
+	}
+
 	// check printf specifiers
-	if(!check_printf_specifiers(key.c_str(), value->c_str()))
+	if(!tl_parser_ctx->check_printf_specifiers(key.c_str(), value->c_str()))
 	{
 		return TL_RESULT::FAILURE;
 	}
 
-	load_index(index, *value);
+	format_table.set_index(index, *value);
 
 	return TL_RESULT::SUCCESS;
 }
+#endif
 
 #endif // TL_COMPILE_TIME_TRANSLATION

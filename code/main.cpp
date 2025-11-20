@@ -6,14 +6,34 @@
 
 #include "core/cvar.h"
 
+#include "core/asan_helper.h"
+
 int main(int argc, char** argv)
 {
+#ifdef MY_HAS_ASAN
+	init_asan();
+#endif
+
 	switch(load_cvar(argc, argv))
 	{
 	case CVAR_LOAD::SUCCESS: break;
 	case CVAR_LOAD::ERROR: show_error("cvar error", serr_get_error().c_str()); return 1;
 	case CVAR_LOAD::CLOSE: return 0;
 	}
+
+#if 0 //def _WIN32
+	// With conemu, I get an address sanitizer error UNLESS I check GetACP
+	// it points to <unknown module> at address 0
+	// you can just enable the Beta: Use Unicode UTF-8 for worldwide language support
+	// or use chcp 65001
+	// and I believe that if you had a Japanese Locale, japanese text should print fine.
+	if(SetConsoleOutputCP(CP_UTF8) == FALSE)
+	{
+		slogf(
+			"SetConsoleOutputCP(CP_UTF8) error: %s\n",
+			WIN_GetFormattedGLE(GetLastError()).c_str());
+	}
+#endif
 
 	if(!get_translation_context().init())
 	{
@@ -25,15 +45,12 @@ int main(int argc, char** argv)
 		show_error("translation error", serr_get_error().c_str());
 		return 1;
 	}
-
 	// TRANSLATORS: this is a comment!
 	slog(_T("test!\n"));
 
-	slogf(/* TRANSLATORS: another comment!*/ _T("test %s!\n"), "foo");
+	/* TRANSLATORS: another comment!*/ slogf_T( "test %s!\n", "foo");
 
-	slogf(
-		_T("test\nnewline: %s!\n") // TRANSLATORS: a third comment!
-		,
+	slogf_T("test\nnewline: %s!\n", // TRANSLATORS: a third comment!
 		"bar");
 
 	// slogf(_T("unknown!\n"), "bar");

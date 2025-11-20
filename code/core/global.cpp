@@ -7,6 +7,7 @@
 #include "cvar.h"
 
 #include "stacktrace.h"
+#include "../util/string_tools.h"
 
 // DISABLE_CONSOLE is old and pointless, it was used to remove console.h
 // for a small test project, but I am keeping this in case I have another test project.
@@ -396,65 +397,3 @@ MY_NOINLINE __attribute__((format(printf, 1, 2))) void serrf(MY_MSVC_PRINTF cons
 #endif
 }
 
-#ifdef __cpp_lib_string_resize_and_overwrite
-#include <cassert>
-#endif
-void str_vasprintf(std::string& out, const char* fmt, va_list args)
-{
-	// you cannot use ASSERT here because ASSERT uses asprintf
-	// ASSERT(fmt != NULL);
-	if(fmt == NULL)
-	{
-		out += "<asprintf_error>: null fmt\n";
-		return;
-	}
-
-	int ret;
-	size_t offset = out.size();
-	pop_errno_t errno_raii;
-	va_list temp_args;
-
-	// it says you should copy if you use valist more than once.
-	va_copy(temp_args, args);
-#ifdef _WIN32
-	// win32 has a compatible C standard library, but annex k prevents exploits or something.
-	ret = _vscprintf(fmt, temp_args);
-#else
-	ret = vsnprintf(NULL, 0, fmt, temp_args);
-#endif
-	va_end(temp_args);
-
-	if(ret == -1) goto err;
-#ifdef __cpp_lib_string_resize_and_overwrite
-	// I try to pay attention to the fact that you should avoid writing to the null terminator.
-	out.resize_and_overwrite(offset + ret + 1, [&](char* p, std::size_t n) -> size_t {
-		int expected_ret = ret;
-#ifdef _WIN32
-		ret = vsprintf_s(p + offset, ret + 1, fmt, args);
-#else
-		ret = vsnprintf(p + offset, ret + 1, fmt, args);
-#endif
-		if(ret == -1) return offset;
-		assert(ret == n - offset - 1 && "this should be true because of the null terminator.");
-		assert(ret == expected_ret);
-		return n - 1;
-	});
-	if(ret == -1) goto err;
-#else
-	// vsnprintf is going to overwrite the null terminator.
-	// if a sanitizer tool as a problem with it, go ahead and +1 and pop_back().
-	out.resize(offset + ret, '?');
-
-#ifdef _WIN32
-	ret = vsprintf_s(out.data() + offset, ret + 1, fmt, args);
-#else
-	ret = vsnprintf(out.data(), ret + 1, fmt, args);
-#endif
-	if(ret == -1) goto err;
-#endif
-
-	return;
-err:
-	out += "<asprintf_error>: ";
-	out += strerror(errno);
-}

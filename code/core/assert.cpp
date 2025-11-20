@@ -11,6 +11,7 @@
 
 #include "stacktrace.h"
 #include "breakpoint.h"
+#include "../util/string_tools.h"
 
 #ifdef DISABLE_CUSTOM_ASSERT
 static int has_custom_assert = 0;

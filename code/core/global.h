@@ -6,6 +6,10 @@
 #include <cerrno>
 #include <cstring>
 
+#ifdef MY_DISABLE_GLOBAL_DEP
+#include "global_stub.h"
+#else
+
 #ifndef DISABLE_SDL
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
@@ -16,6 +20,7 @@
 
 #include "assert.h"
 
+#ifndef MY_MSVC_PRINTF
 // msvc doesn't support __attribute__, unless it is clang-cl.
 #if defined(_MSC_VER) && !defined(__clang__)
 #define __attribute__(x)
@@ -23,6 +28,7 @@
 #define MY_MSVC_PRINTF _Printf_format_string_
 #else
 #define MY_MSVC_PRINTF
+#endif
 #endif
 
 #ifdef _WIN32
@@ -171,16 +177,4 @@ MY_NOINLINE void serr(const char* msg);
 
 void slogf(MY_MSVC_PRINTF const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 MY_NOINLINE void serrf(MY_MSVC_PRINTF const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-
-// a possible improvement would be to use a std::vector as a parameter,
-// to allow a potential reuse of memory.
-void str_vasprintf(std::string& out, const char* fmt, va_list args);
-
-__attribute__((format(printf, 2, 3))) inline void
-	str_asprintf(std::string& out, MY_MSVC_PRINTF const char* fmt, ...)
-{
-	va_list args;
-	va_start(args, fmt);
-	str_vasprintf(out, fmt, args);
-	va_end(args);
-}
+#endif
