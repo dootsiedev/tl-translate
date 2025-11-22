@@ -41,7 +41,7 @@ inline bool escape_string_check_contains(std::string_view input_string)
 }
 
 // a string conversion so '\n' turns into "\\\n"
-inline bool escape_string(std::string &output_string, std::string_view input_string)
+inline bool escape_string(std::string& output_string, std::string_view input_string)
 {
 	// pretty much all my log strings have a newline, so I add a +1
 	output_string.reserve(input_string.size() + 1);
@@ -113,7 +113,10 @@ inline bool rem_escape_string(char* input_string)
 		// if it's an escape code.
 		if(input_string[i] > 0 && input_string[i] < 0x001fu)
 		{
-			serrf("code points <= U+001F must be escaped, got: #%d, offset: %d\n", input_string[i], i);
+			serrf(
+				"code points <= U+001F must be escaped, got: #%d, offset: %d\n",
+				input_string[i],
+				i);
 			return false;
 		}
 		if(j < i)
@@ -142,8 +145,6 @@ inline bool rem_escape_string(char* input_string)
 #endif
 #endif
 
-
-
 #ifdef __cpp_lib_string_resize_and_overwrite
 #include <cassert>
 #endif
@@ -159,7 +160,7 @@ inline void str_vasprintf(std::string& out, const char* fmt, va_list args)
 
 	int ret;
 	size_t offset = out.size();
-	//pop_errno_t errno_raii;
+	// pop_errno_t errno_raii;
 	va_list temp_args;
 
 	// it says you should copy if you use valist more than once.

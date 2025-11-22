@@ -65,14 +65,14 @@ const char* translate_gettext(const char* text);
 #define _T(x) translate_gettext(x)
 #ifdef TL_ENABLE_FORMAT
 const char* translate_get_format(const char* text);
-#define slogf_T(fmt, ...)                           \
-	do                                              \
-	{                                               \
-		if(0)                                       \
-		{                                           \
-			/* get diagnostic warnings */           \
-			slogf(fmt, __VA_ARGS__);                \
-		}                                           \
+#define slogf_T(fmt, ...)                              \
+	do                                                 \
+	{                                                  \
+		if(0)                                          \
+		{                                              \
+			/* get diagnostic warnings */              \
+			slogf(fmt, __VA_ARGS__);                   \
+		}                                              \
 		slogf(translate_get_format(fmt), __VA_ARGS__); \
 	} while(0)
 #endif // TL_ENABLE_FORMAT

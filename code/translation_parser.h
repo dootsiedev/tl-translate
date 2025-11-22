@@ -5,7 +5,7 @@
 
 #ifdef TL_COMPILE_TIME_TRANSLATION
 #error "the parser is only for runtime translation."
-#endif
+#else
 
 // I feel like this is the tipping point of how long this header could be...
 // just too many parameters without labels...
@@ -47,8 +47,8 @@ public:
 	virtual void report_warning(const char* msg) = 0;
 	virtual ~tl_parse_state() = default;
 
-	// this is a odd random place to put this...
 #ifdef TL_ENABLE_FORMAT
+	// this is a weird place to put this...
 	// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 	bool check_printf_specifiers(const char* key, const char* value);
 #endif
@@ -98,3 +98,5 @@ public:
 // testing.
 bool parse_translation_file(
 	tl_parse_observer& o, std::string_view file_contents, const char* path_name);
+
+#endif // TL_COMPILE_TIME_TRANSLATION

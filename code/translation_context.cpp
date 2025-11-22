@@ -113,12 +113,14 @@ bool translation_context::init()
 
 #include "core/RWops.h"
 
-// I would have used SDL3, but I am trying to reduce dependencies.
+// I would have used SDL3, but I am trying to reduce deps (yet this adds deps...)
 #include <filesystem>
 
-#ifdef TL_COMPILE_TIME_ASSERTS
+#if defined(__has_embed) && !defined(NDEBUG) && defined(TL_COMPILE_TIME_ASSERTS)
+// this is used for C++26 #embed (technically C++23 kinda~ on clang)
 #include "util/fnv1a_hash.h"
 #endif
+
 #include "util/string_tools.h"
 
 // translations in a file
@@ -171,7 +173,7 @@ const char* translation_context::format_translations::get_index_key(tl_index fin
 {
 	// index 0 is uninitialized.
 	tl_index index = 1;
-#define TL_FORMAT(key, _)     \
+#define TL_FORMAT(key, _)   \
 	if(find_index == index) \
 	{                       \
 		return key;         \
@@ -362,7 +364,7 @@ bool translation_context::load_languages(const char* folder)
 // clang supports #embed with C++23 with extensions, but it won't set __cpp_pp_embed,
 // but __has_embed works.
 // I could try to replace all_languages.inl to use #embed but I bet it wont respect macros.
-#if defined(__has_embed) && !defined(NDEBUG) // __cpp_pp_embed
+#if defined(__has_embed) && !defined(NDEBUG) && defined(TL_COMPILE_TIME_ASSERTS) // __cpp_pp_embed
 			// #if __has_embed("../translations/english_ref.inl") != __STDC_EMBED_NOT_FOUND__
 			//  check to see if the english ref matches the hash made during compilation.
 			//  this seems to defeat the purpose of runtime translations,
@@ -543,7 +545,7 @@ void translation_context::translation_table::reset()
 
 	// this is an estimate.
 	// (I don't use this because I should use some other pool allocator)
-	//translation_memory.reserve(get_translation_memory_size() * 2);
+	// translation_memory.reserve(get_translation_memory_size() * 2);
 
 	// what to show on the error index.
 	constexpr std::string_view error_string = "<error string>\n";
@@ -578,10 +580,7 @@ bool translation_context::translation_table::validate_translation(const char* la
 	if(num_loaded_translations != get_num_translations())
 	{
 		size_t missing_count = get_num_translations() - num_loaded_translations;
-		slogf(
-			"warning: missing translations (count: %zu): %s\n",
-			missing_count,
-			lang_file);
+		slogf("warning: missing translations (count: %zu): %s\n", missing_count, lang_file);
 		size_t found_count = 0;
 
 		std::string escaped_string;
@@ -602,7 +601,7 @@ bool translation_context::translation_table::validate_translation(const char* la
 				escaped_string.clear();
 				escape_string(escaped_string, key);
 				slogf("- \"%s\"\n", escaped_string.c_str());
-				//set_index(index, key);
+				// set_index(index, key);
 			}
 		}
 		if(!CHECK(found_count == missing_count))

@@ -15,7 +15,6 @@ enum class TL_LANG
 };
 #include "tl_end_macro.txt"
 
-
 #ifndef TL_COMPILE_TIME_ASSERTS
 // because "translate.h" doesn't include it
 #include "translate_get_index.h"
@@ -52,8 +51,6 @@ struct translation_context
 	// pass the path of the file here.
 	// NOTE: would a fs::path be any faster?
 	std::string loading_path;
-
-
 
 	void on_error(const char* msg) override;
 	void on_warning(const char* msg) override;

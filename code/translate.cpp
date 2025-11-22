@@ -74,7 +74,6 @@ const char* translate_get_format(const char* text, tl_index index)
 }
 #endif
 #else
-// TODO: I don't need to copy-paste, I can use get_format_index instead of strcmp
 // NOLINTBEGIN("readability-duplicate-include")
 // Technically I could use get_text_index, to avoid copy paste,
 // but there would be no optimization, get_text_index is only fast if it's constexpr.
@@ -103,6 +102,8 @@ const char* translate_gettext(const char* text)
 #ifdef TL_ENABLE_FORMAT
 const char* translate_get_format(const char* text)
 {
+	// TODO: copy-paste, the functions are identical
+	tl_index index = get_format_index(text);
 #ifdef TL_COMPILE_TIME_TRANSLATION
 	switch(get_translation_context().current_lang)
 	{

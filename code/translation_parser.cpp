@@ -260,7 +260,6 @@ public:
 	}
 };
 
-
 using namespace bp::literals;
 
 auto const header_action = [](auto& ctx) {
@@ -380,13 +379,14 @@ bp::rule<class header_lang, tl_header_tuple> const header_lang =
 bp::rule<class tl_key_r, std::tuple<my_string_type, std::optional<my_string_type>>> const tl_key_r =
 	"TL_TEXT(text, translated_text)";
 #ifdef TL_ENABLE_FORMAT
-bp::rule<class tl_format_r, std::tuple<my_string_type, std::optional<my_string_type>>> const tl_format_r =
-	"TL_FORMAT(text, translated_text)";
+bp::rule<class tl_format_r, std::tuple<my_string_type, std::optional<my_string_type>>> const
+	tl_format_r = "TL_FORMAT(text, translated_text)";
 #endif
 
 bp::rule<class tl_comment_r, my_string_type> const tl_comment_r = "TL_COMMENT(text)";
 bp::rule<class tl_info_r, tl_info_tuple> const tl_info_r = "TL_INFO(source, function, line)";
-bp::rule<class tl_no_match_r, tl_no_match_tuple> const tl_no_match_r = "TL_NO_MATCH(date, git_hash)";
+bp::rule<class tl_no_match_r, tl_no_match_tuple> const tl_no_match_r =
+	"TL_NO_MATCH(date, git_hash)";
 bp::rule<class tl_footer> const tl_footer = "'TL_END' 'TL_TEXT' 'TL_INFO' 'TL_NO_MATCH' etc";
 
 // The json example uses a utf32 transcode, but when parsing unicode characters,
@@ -606,7 +606,8 @@ struct logging_error_handler
 	{
 		ASSERT(*(message.data() + message.size()) == '\0');
 
-		std::string result = print_formatted_error(bp::_begin(context), bp::_end(context), it, message.data());
+		std::string result =
+			print_formatted_error(bp::_begin(context), bp::_end(context), it, message.data());
 		switch(kind)
 		{
 		case bp::diagnostic_kind::error:
