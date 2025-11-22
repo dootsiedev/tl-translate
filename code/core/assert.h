@@ -20,6 +20,9 @@
 #define MY_HAS_SOURCE_LOCATION 0
 #endif
 
+// TODO: PASS_SRC should be replaced by C++26 contract preconditions.
+//  and PASS_SRC is annoying because I don't print both locations (but I print a stacktrace)
+// BUT... I don't know if I can use contracts yet, it seems like it has a few compile time errors.
 #if MY_HAS_SOURCE_LOCATION
 #include <source_location>
 

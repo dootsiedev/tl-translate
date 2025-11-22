@@ -15,6 +15,12 @@ enum class TL_LANG
 };
 #include "tl_end_macro.txt"
 
+
+#ifndef TL_COMPILE_TIME_ASSERTS
+// because "translate.h" doesn't include it
+#include "translate_get_index.h"
+#endif
+
 #ifndef TL_COMPILE_TIME_TRANSLATION
 #include "translation_parser.h"
 struct translation_context : public tl_parse_observer
@@ -94,12 +100,19 @@ struct translation_context
 		// I could use CRTP or function pointers, but I like this.
 		virtual const char* get_index_key(tl_index find_index) = 0;
 		virtual tl_index get_num_translations() = 0;
+#ifndef TL_COMPILE_TIME_ASSERTS
+		// with asserts, the index is already found inside of the macro.
+		virtual tl_index get_index(const char* text) = 0;
+#endif
 		virtual ~translation_table() = default;
 	};
 	struct text_translations : public translation_table
 	{
 		const char* get_index_key(tl_index find_index) override;
 		tl_index get_num_translations() override;
+#ifndef TL_COMPILE_TIME_ASSERTS
+		tl_index get_index(const char* text) override;
+#endif
 	};
 	text_translations text_table;
 
@@ -108,6 +121,9 @@ struct translation_context
 	{
 		const char* get_index_key(tl_index find_index) override;
 		tl_index get_num_translations() override;
+#ifndef TL_COMPILE_TIME_ASSERTS
+		tl_index get_index(const char* text) override;
+#endif
 	};
 	format_translations format_table;
 

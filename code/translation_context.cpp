@@ -149,6 +149,13 @@ const char* translation_context::text_translations::get_index_key(tl_index find_
 	return "<text_translations::get_index_key:notfound>";
 }
 
+#ifndef TL_COMPILE_TIME_ASSERTS
+tl_index translation_context::text_translations::get_index(const char* text)
+{
+	return get_text_index(text);
+}
+#endif
+
 #ifdef TL_ENABLE_FORMAT
 tl_index translation_context::format_translations::get_num_translations()
 {
@@ -175,7 +182,14 @@ const char* translation_context::format_translations::get_index_key(tl_index fin
 #include "tl_end_macro.txt"
 	return "<format_translations::get_index_key:notfound>";
 }
+
+#ifndef TL_COMPILE_TIME_ASSERTS
+tl_index translation_context::format_translations::get_index(const char* text)
+{
+	return get_format_index(text);
+}
 #endif
+#endif // TL_ENABLE_FORMAT
 
 // This only gets the english memory size, which I use as an OK estimate.
 /*
@@ -206,7 +220,7 @@ const char* translation_context::translation_table::get_text(const char* text)
 		return text;
 	}
 #ifndef TL_COMPILE_TIME_ASSERTS
-	auto index = get_text_index(text);
+	auto index = get_index(text);
 #endif
 	ASSERT_M(index != 0 && "translation not found", text);
 	ASSERT(!translation_memory.empty());

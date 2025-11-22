@@ -183,6 +183,11 @@ bool tl_parse_state::check_printf_specifiers(const char* key, const char* value)
 		return false;
 	}
 
+	if(key_count == 0)
+	{
+		report_warning("no % specifiers found\n");
+	}
+
 	return true;
 }
 #endif

@@ -20,6 +20,7 @@ inline constexpr tl_index get_text_index(std::string_view text)
 	return 0;
 }
 #ifdef TL_ENABLE_FORMAT
+// NOLINTBEGIN("readability-duplicate-include")
 inline constexpr tl_index get_format_index(std::string_view text)
 {
 	// index 0 is uninitialized.
@@ -32,4 +33,5 @@ inline constexpr tl_index get_format_index(std::string_view text)
 #include "tl_end_macro.txt"
 	return 0;
 }
+// NOLINTEND("readability-duplicate-include")
 #endif

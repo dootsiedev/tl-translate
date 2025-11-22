@@ -3,7 +3,9 @@
 // maybe for benchmarking compile time cost
 #ifdef TL_DISABLE_TRANSLATE
 #define _T(x) x
-#define _F(x) x
+#ifdef TL_ENABLE_FORMAT
+#define slogf_T slogf
+#endif // TL_ENABLE_FORMAT
 #else
 #ifdef TL_COMPILE_TIME_ASSERTS
 #include "translate_get_index.h"
@@ -61,5 +63,18 @@ const char* translate_get_format(const char* text, tl_index index);
 // but I want to avoid having multiple translation files.
 const char* translate_gettext(const char* text);
 #define _T(x) translate_gettext(x)
+#ifdef TL_ENABLE_FORMAT
+const char* translate_get_format(const char* text);
+#define slogf_T(fmt, ...)                           \
+	do                                              \
+	{                                               \
+		if(0)                                       \
+		{                                           \
+			/* get diagnostic warnings */           \
+			slogf(fmt, __VA_ARGS__);                \
+		}                                           \
+		slogf(translate_get_format(fmt), __VA_ARGS__); \
+	} while(0)
+#endif // TL_ENABLE_FORMAT
 #endif // TL_COMPILE_TIME_ASSERTS
 #endif // TL_DISABLE_TRANSLATE
