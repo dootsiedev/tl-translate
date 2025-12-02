@@ -15,9 +15,9 @@ struct annotated_string
 	std::string data;
 	// c++17 cope
 	annotated_string(tl_buffer_type::iterator iter_, std::string&& data_)
-	: iter(iter_), data(std::move(data_))
+	: iter(iter_)
+	, data(std::move(data_))
 	{
-
 	}
 };
 
@@ -57,7 +57,9 @@ enum class TL_RESULT
 std::string tl_parse_print_formatted_error(
 	tl_buffer_type::iterator first,
 	tl_buffer_type::iterator last,
-	tl_buffer_type::iterator eiter, const char* message, const char* filename);
+	tl_buffer_type::iterator eiter,
+	const char* message,
+	const char* filename);
 
 namespace parse_printf_specifier
 {
@@ -85,7 +87,7 @@ struct printf_specifier_parser_state
 		return !(*this == rhs);
 	}
 };
-}
+} // namespace parse_printf_specifier
 
 // this lets me handle some errors without rebuilding the cursed spirit(boost parser) file.
 // and it's required because I load the data in different ways depending on the tool.

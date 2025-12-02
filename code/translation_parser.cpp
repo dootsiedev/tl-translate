@@ -103,7 +103,9 @@ typedef std::string my_string_type;
 std::string tl_parse_print_formatted_error(
 	tl_buffer_type::iterator first,
 	tl_buffer_type::iterator last,
-	tl_buffer_type::iterator eiter, const char* message, const char* filename)
+	tl_buffer_type::iterator eiter,
+	const char* message,
+	const char* filename)
 {
 	ASSERT(first <= last);
 	ASSERT(first <= eiter);
@@ -173,9 +175,7 @@ std::string tl_parse_print_formatted_error(
 	return result;
 }
 
-
 namespace bp = boost::parser;
-
 
 #ifdef TL_ENABLE_FORMAT
 #if 0
@@ -300,7 +300,8 @@ namespace parse_printf_specifier
 // it breaks between every update, and it's possible that the log system itself crashes.
 // and that's bad because I would try to send the log with error reporting software.
 bp::rule<class any_specifier, int> const any_specifier = "'%c', '%s', '%d', or '%g', and etc";
-bp::rule<class specifier_root, std::optional<int>> const specifier_root = "'%c', '%s', '%d', or '%g', and etc";
+bp::rule<class specifier_root, std::optional<int>> const specifier_root =
+	"'%c', '%s', '%d', or '%g', and etc";
 bp::symbols<int> const any_specifier_def = {
 	{"c", 1},
 	{"f", 2},
@@ -359,9 +360,9 @@ auto const add_specifier = [](auto& ctx) {
 	bp::_globals(ctx).specifier = bp::_attr(ctx);
 };
 
-//I manually check for % before running the parser
-// I also use bp::eps > ... on bp::prefix_parse,
-// I tried to put it here, but it didn't print a nice error I think
+// I manually check for % before running the parser
+//  I also use bp::eps > ... on bp::prefix_parse,
+//  I tried to put it here, but it didn't print a nice error I think
 auto const specifier_root_def = -min_width_and_field_width >> any_specifier[add_specifier];
 
 BOOST_PARSER_DEFINE_RULES(any_specifier, specifier_root);
@@ -371,7 +372,8 @@ BOOST_PARSER_DEFINE_RULES(any_specifier, specifier_root);
 struct format_specifier_error_handler
 {
 	explicit format_specifier_error_handler(tl_parse_state& o_, tl_buffer_type::iterator vbegin_)
-	: o(o_), vbegin(vbegin_)
+	: o(o_)
+	, vbegin(vbegin_)
 	{
 	}
 
@@ -449,8 +451,7 @@ bool tl_parse_state::find_specifier(
 		cur++;
 		if(cur == end)
 		{
-			report_error(
-				"% specifier reached end of string", vbegin + std::distance(start, cur));
+			report_error("% specifier reached end of string", vbegin + std::distance(start, cur));
 			return false;
 		}
 		if(*cur == '%')
@@ -486,7 +487,8 @@ bool tl_parse_state::find_specifier(
 	return true;
 }
 
-bool tl_parse_state::check_printf_specifiers(std::string_view key, std::string_view value, tl_buffer_type::iterator vbegin)
+bool tl_parse_state::check_printf_specifiers(
+	std::string_view key, std::string_view value, tl_buffer_type::iterator vbegin)
 {
 	auto kit = key.begin();
 	auto kend = key.end();
@@ -522,21 +524,24 @@ bool tl_parse_state::check_printf_specifiers(std::string_view key, std::string_v
 			{
 				// TODO: print this better
 				std::string message;
-				str_asprintf(message, "mismatching specifier (%d %d %d != %d %d %d)",
-							 key_state.specifier,
-							 key_state.variable_min_width_flag,
-							 key_state.variable_field_width_flag,
-							 value_state.specifier,
-							 value_state.variable_min_width_flag,
-							 value_state.variable_field_width_flag);
+				str_asprintf(
+					message,
+					"mismatching specifier (%d %d %d != %d %d %d)",
+					key_state.specifier,
+					key_state.variable_min_width_flag,
+					key_state.variable_field_width_flag,
+					value_state.specifier,
+					value_state.variable_min_width_flag,
+					value_state.variable_field_width_flag);
 				// It's funny I ONLY added annotations for the value
 				// yet it is completely broken with unicode...
 				// If the terminal / dialogs supported unicode combinations,
 				// that could be used to replace the arrow, but I don't know which glyph to use...
-				report_error(message.c_str(), vbegin + std::distance(value.begin(), value_state.where));
+				report_error(
+					message.c_str(), vbegin + std::distance(value.begin(), value_state.where));
 
 				// if I annotated the key...
-				//report_error("from here", vbegin + (value_state.where - value.begin()));
+				// report_error("from here", vbegin + (value_state.where - value.begin()));
 
 				return false;
 			}
@@ -561,7 +566,6 @@ bool tl_parse_state::check_printf_specifiers(std::string_view key, std::string_v
 }
 
 #endif
-
 
 namespace tl_parser
 {
@@ -781,8 +785,8 @@ bp::rule<class string_char, uint32_t> const string_char =
 	"code point (code points <= U+001F must be escaped)";
 bp::rule<class single_escaped_char, uint32_t> const single_escaped_char = "'\"', '\\', 'n', or 't'";
 bp::rule<class quoted_string, my_string_type> const quoted_string = "quoted string";
-bp::rule<class nullable_quoted_string, std::optional<annotated_string>> const nullable_quoted_string =
-	"quoted string or NULL";
+bp::rule<class nullable_quoted_string, std::optional<annotated_string>> const
+	nullable_quoted_string = "quoted string or NULL";
 
 bp::rule<class string_enum, std::string> const string_enum = "enum";
 
@@ -815,7 +819,7 @@ auto add_annotation = [](auto& ctx) {
 //  so I have annotated_string{optional<string>,iter}
 //  I need to manually create the attribute however, since it's not automatic anymore.
 auto const nullable_quoted_string_def = quoted_string[add_annotation] | "NULL"_l;
-//auto const nullable_quoted_string_def = quoted_string | "NULL"_l;
+// auto const nullable_quoted_string_def = quoted_string | "NULL"_l;
 
 // this is not a true C compatible syntax
 auto const string_enum_def = bp::lexeme[+(bp::no_case[bp::char_('a', 'z')] | bp::char_('_'))];
@@ -915,7 +919,8 @@ struct logging_error_handler
 
 		std::string error = "error: Expected ";
 		error += e.what();
-		std::string message = tl_parse_print_formatted_error(first, last, e.iter, error.c_str(), filename);
+		std::string message =
+			tl_parse_print_formatted_error(first, last, e.iter, error.c_str(), filename);
 
 		o.on_error(message.c_str());
 		return bp::error_handler_result::fail;
@@ -929,7 +934,8 @@ struct logging_error_handler
 	{
 		ASSERT(*(message.data() + message.size()) == '\0');
 
-		std::string result = tl_parse_print_formatted_error(bp::_begin(context), bp::_end(context), it, message.data(), filename);
+		std::string result = tl_parse_print_formatted_error(
+			bp::_begin(context), bp::_end(context), it, message.data(), filename);
 		switch(kind)
 		{
 		case bp::diagnostic_kind::error:
