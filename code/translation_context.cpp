@@ -612,7 +612,7 @@ bool translation_context::translation_table::validate_translation(const char* la
 	return true;
 }
 
-TL_RESULT translation_context::on_translation(std::string& key, std::optional<std::string>& value)
+TL_RESULT translation_context::on_translation(std::string& key, std::optional<annotated_string>& value)
 {
 	if(parse_headers)
 	{
@@ -647,14 +647,14 @@ TL_RESULT translation_context::on_translation(std::string& key, std::optional<st
 		return TL_RESULT::SUCCESS;
 	}
 
-	text_table.set_index(index, *value);
+	text_table.set_index(index, value->data);
 
 	return TL_RESULT::SUCCESS;
 }
 
 #ifdef TL_ENABLE_FORMAT
 
-TL_RESULT translation_context::on_format(std::string& key, std::optional<std::string>& value)
+TL_RESULT translation_context::on_format(std::string& key, std::optional<annotated_string>& value)
 {
 	// TODO: copy paste, I think I could make the format validator part of the parser?
 	if(parse_headers)
@@ -691,12 +691,12 @@ TL_RESULT translation_context::on_format(std::string& key, std::optional<std::st
 	}
 
 	// check printf specifiers
-	if(!tl_parser_ctx->check_printf_specifiers(key.c_str(), value->c_str()))
+	if(!tl_parser_ctx->check_printf_specifiers(key, value->data, value->iter))
 	{
 		return TL_RESULT::FAILURE;
 	}
 
-	format_table.set_index(index, *value);
+	format_table.set_index(index, value->data);
 
 	return TL_RESULT::SUCCESS;
 }

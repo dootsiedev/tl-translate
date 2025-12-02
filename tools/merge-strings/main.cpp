@@ -77,13 +77,6 @@ __attribute__((format(printf, 1, 2))) static void werrf(MY_MSVC_PRINTF const cha
 #include <vector>
 #include <stdio.h>
 
-// make TL and Comment into a class... I should just move this back into the parser...
-struct tl_key
-{
-	std::string key;
-	std::optional<std::string> value;
-};
-
 struct tl_comment
 {
 	std::string comment;
@@ -94,14 +87,19 @@ typedef std::variant<tl_comment, tl_info, tl_no_match> translation_variant;
 // build an AST
 struct entry_ast
 {
-	tl_key key;
+	std::string key;
+	std::optional<std::string> value;
 	std::vector<translation_variant> extra;
-#ifdef TL_ENABLE_FORMAT
 	bool format_text = false;
-#endif
+	entry_ast() = default;
 	// C++17 emplace back pain
-	entry_ast(tl_key&& key_, std::vector<translation_variant>&& extra_, bool format = false)
+	entry_ast(
+		std::string&& key_,
+		std::optional<std::string>&& value_,
+		std::vector<translation_variant>&& extra_,
+		bool format = false)
 	: key(std::move(key_))
+	, value(std::move(value_))
 	, extra(std::move(extra_))
 	, format_text(format)
 	{
@@ -114,7 +112,7 @@ struct load_ast_handler : public tl_parse_observer
 	std::vector<entry_ast> ast_root;
 	tl_header header;
 	bool is_patch = false;
-	std::optional<std::vector<entry_ast>> patch_ast_root;
+
 	void on_warning(const char* msg) override
 	{
 		werr(msg);
@@ -129,73 +127,52 @@ struct load_ast_handler : public tl_parse_observer
 		header = std::move(header_);
 		return TL_RESULT::SUCCESS;
 	}
-	TL_RESULT on_translation(std::string& key, std::optional<std::string>& value) override
+
+
+	TL_RESULT on_insert(std::string& key, std::optional<std::string>& value, bool format)
 	{
 		// NOTE: is the key captured as a reference or a copy if I [key]?
-		auto find_it = std::find_if(ast_root.begin(), ast_root.end(), [&key](const entry_ast& ast) {
-			return ast.key.key == key;
+		auto find_it = std::find_if(ast_root.begin(), ast_root.end(), [&key](const entry_ast& ast) -> bool {
+			return ast.key == key;
 		});
 
 		if(find_it != ast_root.end())
 		{
-			if(is_patch)
+			if(find_it->format_text != format)
 			{
-				for(auto& extra : extra_stack)
-				{
-					find_it->extra.emplace_back(std::move(extra));
-				}
-				extra_stack.clear();
+				tl_parser_ctx->report_error("duplicate mismatching TL_TEXT with TL_FORMAT!");
+				return TL_RESULT::FAILURE;
 			}
-			else
+			if(!is_patch)
 			{
-				// NOTE: it's possible to store the annotations so that I print the error later.
-				tl_parser_ctx->report_warning("duplicate");
-				return TL_RESULT::WARNING;
+				// I don't return TL_RESULT::WARNING because it does nothing.
+				tl_parser_ctx->report_warning("merging duplicate (this shouldn't happen)");
 			}
+			for(auto& extra : extra_stack)
+			{
+				find_it->extra.emplace_back(std::move(extra));
+			}
+			extra_stack.clear();
 		}
 		else
 		{
-			ast_root.emplace_back(tl_key{std::move(key), std::move(value)}, std::move(extra_stack));
+			ast_root.emplace_back(std::move(key), std::move(value), std::move(extra_stack), format);
 		}
 		return TL_RESULT::SUCCESS;
 	}
-#ifdef TL_ENABLE_FORMAT
-	TL_RESULT on_format(std::string& key, std::optional<std::string>& value) override
+
+	TL_RESULT on_translation(std::string& key, std::optional<annotated_string>& value) override
 	{
-		// TODO: this is copy pasted except for passing true to the constructor
-		// this ignored warning, but warning does nothing ATM.
-		if(on_translation(key, value) == TL_RESULT::FAILURE)
-		{
-			return TL_RESULT::FAILURE;
-		}
-
-		// NOTE: is the key captured as a reference or a copy if I [key]?
-		auto find_it = std::find_if(ast_root.begin(), ast_root.end(), [&key](const entry_ast& ast) {
-			return ast.key.key == key;
-		});
-
-		if(find_it != ast_root.end())
-		{
-			if(is_patch)
-			{
-				for(auto& extra : extra_stack)
-				{
-					find_it->extra.emplace_back(std::move(extra));
-				}
-				extra_stack.clear();
-			}
-			else
-			{
-				// NOTE: it's possible to store the annotations so that I print the error later.
-				tl_parser_ctx->report_warning("duplicate");
-				return TL_RESULT::WARNING;
-			}
-		}
-		else
-		{
-			ast_root.emplace_back(tl_key{std::move(key), std::move(value)}, std::move(extra_stack), true);
-		}
-		return TL_RESULT::SUCCESS;
+		std::optional<std::string> val;
+		if(value.has_value()){val = std::make_optional<std::string>(value->data);}
+		return on_insert(key, val, false);
+	}
+#ifdef TL_ENABLE_FORMAT
+	TL_RESULT on_format(std::string& key, std::optional<annotated_string>& value) override
+	{
+		std::optional<std::string> val;
+		if(value.has_value()){val = std::make_optional<std::string>(value->data);}
+		return on_insert(key, val, true);
 	}
 #endif
 	TL_RESULT on_comment(std::string& comment) override
@@ -215,8 +192,170 @@ struct load_ast_handler : public tl_parse_observer
 		return TL_RESULT::SUCCESS;
 	}
 
+	//  internally I already check the specifiers while loading,
+	// but I want to check it while merging, but to do so, is very ugly.
+	// TODO: This should be moved back into the spirit header,
+	//  It's not ATM because it takes forever to compile.
+	class tl_check_wrapper : public tl_parse_state
+	{
+	public:
+		std::string error_message;
+		void report_error(const char* msg) override
+		{
+			// I don't want to print to serr because I instead just add TL_ERROR.
+			// TODO: I have not implemented werror...
+			//got_error = true;
+			//serr(msg);
+			error_message = msg;
+		}
+		void report_warning(const char* msg) override
+		{
+			info(msg);
+		}
+	};
 
-	bool merge() {}
+	typedef decltype(ast_root)::iterator iter_type;
+	typedef decltype(ast_root)::const_iterator c_iter_type;
+
+	// This is messy, not too happy about it.
+	// I wish I could use const, but it's not possible without a mess.
+	static std::vector<iter_type> find_missing(load_ast_handler& to_, load_ast_handler& from_, bool merge_to)
+	{
+		ASSERT(to_.is_patch != from_.is_patch);
+		auto& to = to_.ast_root;
+		auto& from = from_.ast_root;
+		std::vector<iter_type> missing;
+		for(auto it = from.begin(); it != from.end(); ++it)
+		{
+			auto find_it =
+				std::find_if(to.begin(), to.end(), [it](const entry_ast& ast) -> bool {
+					return ast.key == it->key;
+				});
+			if(find_it != to.end())
+			{
+				ASSERT(find_it->format_text == it->format_text && "this should have been already checked during parsing!");
+				if(merge_to)
+				{
+					find_it->extra.clear();
+					find_it->extra.insert(find_it->extra.end(), it->extra.begin(), it->extra.end());
+				}
+			}
+			else
+			{
+				missing.push_back(it);
+			}
+		}
+		return missing;
+	}
+
+	// I use iterators so that I could add annotations, but I don't know how helpful it is...
+	bool check_printf(iter_type missing_patch, c_iter_type missing_old_text)
+	{
+		//tl_check_wrapper wrapper;
+		//if(!wrapper.check_printf_specifiers(
+		//		   missing_patch->key.c_str(), missing_old_text->key.c_str()))
+		{
+			//missing_patch->extra.insert(missing_patch->extra.begin(), TL_ERROR)
+		}
+		return true;
+	}
+
+	//returns true if merged.
+	bool auto_merge(iter_type missing_patch, c_iter_type missing_old_text)
+	{
+		for(const auto &extra : missing_old_text->extra)
+		{
+			const auto *info_result = std::get_if<tl_info>(&extra);
+			if(info_result != nullptr)
+			{
+				for(auto& jextra : missing_patch->extra)
+				{
+					auto* jinfo_result = std::get_if<tl_info>(&jextra);
+					if(jinfo_result != nullptr)
+					{
+						if(info_result->source_file != jinfo_result->source_file)
+						{
+							continue;
+						}
+						if(!check_printf(missing_patch, missing_old_text))
+						{
+
+						}
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	// add the patch to the ast.
+	bool merge(load_ast_handler& patch)
+	{
+		ASSERT(!is_patch);
+		ASSERT(patch.is_patch);
+
+		// possibly new translations or failed to match.
+		std::vector<iter_type> missing_patches = find_missing(*this, patch, true);
+		// possibly removed text or failed to match
+		const std::vector<iter_type> missing_old_text = find_missing(patch, *this, false);
+
+		/*
+		for(auto it : missing_patches)
+		{
+			info(it->key.c_str());
+		}
+		for(auto it : missing_old_text)
+		{
+			info(it->key.c_str());
+		}*/
+		for(auto it : missing_old_text)
+		{
+			for(auto jt : missing_patches)
+			{
+				if(auto_merge(jt, it))
+				{
+					infof("found merge with: `%s` == `%s`\n", jt->key.c_str(), it->key.c_str());
+					it->extra.clear();
+					it->extra = jt->extra;
+				}
+			}
+		}
+
+		// add TL_NO_MATCH
+		for(auto it : missing_old_text)
+		{
+			bool found = false;
+			for(auto &extra : it->extra)
+			{
+				auto *result = std::get_if<tl_no_match>(&extra);
+				if(result != nullptr)
+				{
+					found = true;
+					break;
+				}
+			}
+			if(!found)
+			{
+				it->extra.insert(it->extra.begin(),tl_no_match{header.date,header.git_hash});
+			}
+		}
+
+		// add the patches.
+		// I add it to the front because I don't want to scroll down to see missing translations
+		// since I assume this will be used iteratively,
+		// optionally after you translate everything, can sort it
+		// THIS WILL INVALIDATE missing_old_text ITERATORS
+		ast_root.insert(ast_root.begin(), missing_patches.size(), entry_ast{});
+		int i = 0;
+		for(auto it : missing_patches)
+		{
+			ast_root[i] = *it;
+			++i;
+		}
+
+		return true;
+	}
 	bool post_parse()
 	{
 		// I could technically make this a rule in boost parser,
@@ -241,7 +380,7 @@ struct format_ast_visitor
 		{
 			return false;
 		}
-		if(fprintf(file, "COMMENT(\"%s\")\n", escape_buffer.c_str()) < 0)
+		if(fprintf(file, "TL_COMMENT(\"%s\")\n", escape_buffer.c_str()) < 0)
 		{
 			serrf("fprintf: %s\n", strerror(errno));
 			return false;
@@ -256,7 +395,7 @@ struct format_ast_visitor
 		// TODO: I don't check for escaped string, but I should make that a parser rule.
 		if(fprintf(
 			   file,
-			   "INFO(\"%s\", \"%s\", %d, %d)\n",
+			   "TL_INFO(\"%s\", \"%s\", %d, %d)\n",
 			   info.function.c_str(),
 			   info.source_file.c_str(),
 			   info.line,
@@ -274,7 +413,7 @@ struct format_ast_visitor
 		// TODO: I don't check for escaped string, but I should make that a parser rule.
 		if(fprintf(
 			   file,
-			   "NO_MATCH(\"%s\", \"%s\")\n",
+			   "TL_NO_MATCH(\"%s\", \"%s\")\n",
 			   no_match.date.c_str(),
 			   no_match.git_hash.c_str()) < 0)
 		{
@@ -313,17 +452,17 @@ static bool dump_formatted_ast(FILE* file, std::vector<entry_ast>& ast_root, tl_
 		}
 
 		std::string key_buffer;
-		if(!escape_string(key_buffer, entry.key.key))
+		if(!escape_string(key_buffer, entry.key))
 		{
 			return false;
 		}
 		std::string value_buffer;
-		if(entry.key.value.has_value())
+		if(entry.value.has_value())
 		{
 			// it should be +2, but I add +1 for a single newline escape.
-			value_buffer.reserve(entry.key.value->size() + 3);
+			value_buffer.reserve(entry.value->size() + 3);
 			value_buffer += '\"';
-			if(!escape_string(value_buffer, *entry.key.value))
+			if(!escape_string(value_buffer, *entry.value))
 			{
 				return false;
 			}
@@ -334,8 +473,12 @@ static bool dump_formatted_ast(FILE* file, std::vector<entry_ast>& ast_root, tl_
 			value_buffer = "NULL";
 		}
 
-		bool has_value = entry.key.value.has_value();
-		if(fprintf(file, "TL(\"%s\", %s)\n\n", key_buffer.c_str(), value_buffer.c_str()) < 0)
+		bool has_value = entry.value.has_value();
+		if(fprintf(
+			   file,
+			   entry.format_text ? "TL_FORMAT(\"%s\", %s)\n\n" : "TL_TEXT(\"%s\", %s)\n\n",
+			   key_buffer.c_str(),
+			   value_buffer.c_str()) < 0)
 		{
 			serrf("fprintf: %s\n", strerror(errno));
 			return false;
@@ -427,6 +570,63 @@ static bool slurp_file(std::string& out, const char* path)
 	return success;
 }
 
+#if 0
+// this only finds duplicates inside of the patch.
+static bool merge_patch(std::vector<entry_ast>& ast_patch)
+{
+	bool success = true;
+#ifndef NDEBUG
+	// slow test to make sure this is actually a patch file.
+	for(auto& ast : ast_patch)
+	{
+		if(ast.key.value.has_value())
+		{
+			serrf("merge_patch: Patch files must not have values stored!: `%s`", ast.key.key.c_str());
+			success = false;
+		}
+	}
+#endif
+	// I looked on the internet for "remove duplicates from vector"
+	// and I found a dozen solutions, but none match this.
+	// I think it might be possible that just sorting this and doing std::unique is faster.
+	// but I don't want to actually sort anything
+	// (sorting would fix the problem of the translation file being "updated" in git
+	// if you change the order of files in cmake or within the code,
+	// but I kind of like unsorted translations... technically it's still ordered in a way
+	// BUT this won't happen for incremental patches, since it will only append to the end. )
+	auto rit = std::remove_if(
+		ast_patch.rbegin(), ast_patch.rend(), [&ast_patch, &success](entry_ast& cur_ast) -> bool {
+			// the pointer offset only works for std::vector
+			// I could have a custom std::remove_if that passes the iterator / index
+			auto index = (&cur_ast - ast_patch.data());
+			ASSERT(index < ast_patch.size());
+			auto it_end = std::next(ast_patch.begin(), index);
+			auto find_it =
+				std::find_if(ast_patch.begin(), it_end, [&cur_ast](entry_ast& ast) -> bool {
+					return ast.key.key == cur_ast.key.key;
+				});
+			if(find_it != it_end)
+			{
+				if(find_it->format_text != cur_ast.format_text)
+				{
+					// TODO: I could probably pretty print with extra data showing the file and line
+					serrf(
+						"merge_patch: mismatching TL_TEXT with TL_FORMAT! %s",
+						find_it->key.key.c_str());
+					success = false;
+					return false;
+				}
+				find_it->extra.insert(
+					find_it->extra.begin(), cur_ast.extra.begin(), cur_ast.extra.end());
+			}
+			return true;
+		});
+	// this could be avoided if I used a range
+	ast_patch.erase(ast_patch.begin(), ast_patch.begin() + std::distance(rit, ast_patch.rend()));
+
+	return success;
+}
+
 // modifies ast_out with the patch
 static bool merge_ast(std::vector<entry_ast>& ast_out, const std::vector<entry_ast>& ast_patch)
 {
@@ -434,7 +634,9 @@ static bool merge_ast(std::vector<entry_ast>& ast_out, const std::vector<entry_a
 	std::vector<unsigned int> missing_entry;
 	for(auto it = ast_out.begin(); it != ast_out.end(); ++it)
 	{
-		auto find_it = std::find_if(ast_patch.begin(), ast_patch.end(), [it](const entry_ast& ast){return ast.key.key == it->key.key;});
+		auto find_it = std::find_if(ast_patch.begin(), ast_patch.end(), [it](const entry_ast& ast) {
+			return ast.key == it->key;
+		});
 		if(find_it != ast_out.end())
 		{
 			// TODO: the PATCH will ADD INFO (inside itself), the MERGE will REPLACE (+warn on duplicates)!
@@ -447,10 +649,11 @@ static bool merge_ast(std::vector<entry_ast>& ast_out, const std::vector<entry_a
 	}
 	for(auto slot: missing_entry)
 	{
-		infof("missing: %s\n", ast_patch[slot].key.key.c_str());
+		infof("missing: %s\n", ast_patch[slot].key.c_str());
 	}
 	return true;
 }
+#endif
 
 #define CXXOPTS_NO_EXCEPTIONS
 #include <cxxopts.hpp>
@@ -482,6 +685,7 @@ static bool load_translation_ast()
 	// after_patch.patch_root = std::move(patch.ast_root);
 
 	load_ast_handler patch_ast;
+	patch_ast.is_patch = true;
 	if(!parse_translation_file(patch_ast, slurp_string, merge_patch.c_str()))
 	{
 		return false;
@@ -580,6 +784,16 @@ static bool load_translation_ast()
 			return false;
 		}
 		if(!ast.post_parse())
+		{
+			return false;
+		}
+
+		if(!ast.merge(patch_ast))
+		{
+			return false;
+		}
+
+		if(!dump_formatted_ast(stdout, ast.ast_root, ast.header))
 		{
 			return false;
 		}

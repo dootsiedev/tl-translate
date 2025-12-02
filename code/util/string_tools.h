@@ -41,6 +41,9 @@ inline bool escape_string_check_contains(std::string_view input_string)
 }
 
 // a string conversion so '\n' turns into "\\\n"
+// Also, I find it really neat that libfmt / C++20 std::println will escape strings for you.
+// And I really hate passing the string as a parameter,
+// but it's either this or std::optional or exceptions
 inline bool escape_string(std::string& output_string, std::string_view input_string)
 {
 	// pretty much all my log strings have a newline, so I add a +1
@@ -68,7 +71,7 @@ inline bool escape_string(std::string& output_string, std::string_view input_str
 			break;
 		default:
 			// if it is a control code.
-			if(c > 0 && c < 0x001fu)
+			if(c >= 0 && c <= 0x001fu)
 			{
 				serrf(
 					"got a unexpected control code, got: #%d, offset: %zu\n",
@@ -101,17 +104,17 @@ inline bool rem_escape_string(char* input_string)
 			case '\\': input_string[j] = '\\'; break;
 			case '\0': serr("expected escape code, got null\n"); return false;
 			default:
-				if(isalnum(input_string[i]) != 0)
+				if(input_string[i] >= 0 && input_string[i] <= 0x001fu)
 				{
-					serrf("expected escape code, got: %c, offset: %d\n", input_string[i], i);
+					serrf("expected escape code, got: #%d, offset: %d\n", input_string[i], i);
 					return false;
 				}
-				serrf("expected escape code, got: #%d, offset: %d\n", input_string[i], i);
+				serrf("expected escape code, got: %c, offset: %d\n", input_string[i], i);
 				return false;
 			}
 		}
 		// if it's an escape code.
-		if(input_string[i] > 0 && input_string[i] < 0x001fu)
+		if(input_string[i] >= 0 && input_string[i] <= 0x001fu)
 		{
 			serrf(
 				"code points <= U+001F must be escaped, got: #%d, offset: %d\n",

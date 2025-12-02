@@ -56,7 +56,7 @@ struct translation_context
 	void on_warning(const char* msg) override;
 
 	TL_RESULT on_header(tl_header& header) override;
-	TL_RESULT on_translation(std::string& key, std::optional<std::string>& value) override;
+	TL_RESULT on_translation(std::string& key, std::optional<annotated_string>& value) override;
 
 	std::vector<language_entry> language_list;
 
@@ -124,7 +124,7 @@ struct translation_context
 	};
 	format_translations format_table;
 
-	TL_RESULT on_format(std::string& key, std::optional<std::string>& value) override;
+	TL_RESULT on_format(std::string& key, std::optional<annotated_string>& value) override;
 #endif
 
 	bool load_languages(const char* folder);

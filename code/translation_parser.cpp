@@ -100,9 +100,89 @@
 // I want to support string_view (C++20) but this won't apply to enums ATM
 typedef std::string my_string_type;
 
-#ifdef TL_ENABLE_FORMAT
-bool tl_parse_state::check_printf_specifiers(const char* key, const char* value)
+std::string tl_parse_print_formatted_error(
+	tl_buffer_type::iterator first,
+	tl_buffer_type::iterator last,
+	tl_buffer_type::iterator eiter, const char* message, const char* filename)
 {
+	ASSERT(first <= last);
+	ASSERT(first <= eiter);
+	ASSERT(eiter <= last);
+	ASSERT(message != NULL);
+
+	int line_number = 1;
+	int column_number = 0;
+	std::string underlying;
+
+	auto cur = first;
+	auto newline_start = first;
+	for(; cur != eiter; ++cur)
+	{
+		if(*cur == '\n')
+		{
+			line_number++;
+			newline_start = cur + 1;
+		}
+	}
+
+	for(; cur != last; ++cur)
+	{
+		// the \r goes before the newline, which is why I ignore it above.
+		if(*cur == '\n' || *cur == '\r')
+		{
+			break;
+		}
+	}
+	underlying = std::string(newline_start, cur);
+
+	std::string result;
+	if(newline_start < eiter)
+	{
+		cur = newline_start;
+		utf8::internal::utf_error err_code;
+		do
+		{
+			uint32_t cp;
+			err_code = utf8::internal::validate_next(cur, eiter, cp);
+			switch(err_code)
+			{
+			case utf8::internal::UTF8_OK: column_number++; break;
+			default:
+				// I have not tested how this looks.
+				result = "utf8 error: ";
+				result += utf8cpp_get_error(err_code);
+				result += '\n';
+			}
+		} while(err_code == utf8::internal::UTF8_OK && cur < eiter);
+	}
+
+	str_asprintf(
+		result,
+		"%s:%d:%d: %s here%s\n"
+		"%s\n"
+		"%*s^\n",
+		filename,
+		line_number,
+		column_number,
+		message,
+		(cur == last) ? " (end of input)" : "",
+		underlying.c_str(),
+		column_number,
+		"");
+
+	return result;
+}
+
+
+namespace bp = boost::parser;
+
+
+#ifdef TL_ENABLE_FORMAT
+#if 0
+bool tl_parse_state::check_printf_specifiers(std::string_view key_, std::string_view value_)
+{
+	const char *key = key_.data();
+	const char *value = value_.data();
 	// count the number, so I can print it.
 	int key_count = 0;
 	int value_count = 0;
@@ -110,13 +190,13 @@ bool tl_parse_state::check_printf_specifiers(const char* key, const char* value)
 	const char* found_value = value;
 	do
 	{
+		// this would probably be simpler & faster if I didn't use strchr...
 		if(found_key != nullptr) found_key = strchr(found_key, '%');
 		if(found_value != nullptr) found_value = strchr(found_value, '%');
-		if(found_key != nullptr && found_value != nullptr)
+		if(found_key != nullptr)
 		{
 			switch(found_key[1])
 			{
-			case '%':
 			case 'f':
 			case 'F':
 			case 'g':
@@ -124,6 +204,7 @@ bool tl_parse_state::check_printf_specifiers(const char* key, const char* value)
 			case 'e':
 			case 'E':
 				// above are all floats, I want to allow mixing, but it does not matter.
+			case '%':
 			case 'd':
 			case 'u':
 			case 's':
@@ -131,12 +212,16 @@ bool tl_parse_state::check_printf_specifiers(const char* key, const char* value)
 			case 'x':
 			case 'X':
 			case 'p':
-				if(found_key[1] != found_value[1])
+				if(found_value != nullptr && found_key[1] != found_value[1])
 				{
 					std::string str;
 					str_asprintf(
 						str,
-						"mismatching %% format specifier! (%%%c != %%%c)\n",
+						// TODO: use utf8::internal::validate_next to check + print range...
+						(found_value[1] >= 0 && found_value[1] <= 0x001fu)
+							// control codes are not possible because quoted_string checks.
+							? "mismatching %% format specifier! (%%%c != #%d) NOTE: control codes should not be possible\n"
+							: "mismatching %% format specifier! (%%%c != %%%c)\n",
 						found_key[1],
 						found_value[1]);
 					report_error(str.c_str());
@@ -144,12 +229,15 @@ bool tl_parse_state::check_printf_specifiers(const char* key, const char* value)
 				}
 				break;
 			default: {
-				// this is a warning because this is unreachable,
-				// if you change the specifier it will not match,
-				// if you change the key, it will not find the translation.
 				std::string str;
-				str_asprintf(str, "unknown key %% format specifier! (%%%c)\n", found_key[1]);
-				report_warning(str.c_str());
+				str_asprintf(
+					str,
+					(found_key[1] >= 0 && found_key[1] <= 0x001fu)
+						? "unknown key %% format specifier! (#%d) NOTE: control codes should not be possible\n"
+						: "unknown key %% format specifier! (%%%c)\n",
+					found_key[1]);
+				report_error(str.c_str());
+				return false;
 			}
 			}
 		}
@@ -185,14 +273,283 @@ bool tl_parse_state::check_printf_specifiers(const char* key, const char* value)
 
 	if(key_count == 0)
 	{
-		report_warning("no % specifiers found\n");
+		report_warning("no % specifiers found for printf style format\n");
 	}
 
 	return true;
 }
 #endif
 
-namespace bp = boost::parser;
+namespace parse_printf_specifier
+{
+
+// I think spirit (parser) is not the right tool for parsing this
+// because (Correct me if I am wrong) printf formatting has no backtracking.
+// (my code does backtrack, but I believe it's possible to avoid it).
+// which means a parser with full diagnostics could be as simple as like 200~ lines of code.
+// since this is probably slower compared to asprintf or std::runtime_format
+// and maybe even C++ string streams extractors (this doesn't even print anything)
+// and even if it matched the speed, it still has spirit's compile time + binary growth.
+// (it added 100kb + 3mb debug info on the release build (total 400kb + 15mb), ontop of TL).
+// But what this could potentially do that std::runtime_format can't,
+// is I could go with an embedded style binary log,
+// where I store the format string index + arguments in raw binary, and that would be fast,
+// maybe fast enough that I could use it to substitute sentry breadcrumbs.
+// BUT I still wish I could write the formatter from scratch, using musl or something for ref.
+// AND it would be wrong to store the log files in binary instead of plain text, because
+// it breaks between every update, and it's possible that the log system itself crashes.
+// and that's bad because I would try to send the log with error reporting software.
+
+bp::rule<class any_specifier, int> const any_specifier = "'%c', '%s', '%d', or '%g', and etc";
+bp::rule<class specifier_root, int> const specifier_root = "'%c', '%s', '%d', or '%g', and etc";
+
+bp::symbols<int> const any_specifier_def = {
+	{"c", 1},
+	{"f", 2},
+	{"F", 2},
+	{"g", 2},
+	{"G", 2},
+	{"d", 5},
+	{"i", 5},
+	{"u", 6},
+	{"x", 6},
+	{"X", 6},
+	// technically I could treat z and ll as prefixes for u/d/i, but would that help?
+	{"zu", 7},
+
+	{"llu", 9},
+	{"llx", 9},
+	{"llX", 9},
+	{"lld", 10},
+	{"lli", 10},
+	{"s", 4},
+	{"p", 8}};
+
+// a real dumb hack. I also considered using bp::transform, but it would be uglier.
+auto set_min_width_flag = [](auto& ctx) { bp::_globals(ctx).variable_min_width_flag = true; };
+auto set_field_width_flag = [](auto& ctx) { bp::_globals(ctx).variable_field_width_flag = true; };
+
+
+auto check_number = [](auto& ctx) {
+	// if you had control of the string, a lot worse could be done,
+	// but I assume this is an error
+	const int max_specifier_size = 1000;
+	if(std::abs(_attr(ctx)) > max_specifier_size)
+	{
+		std::string err;
+		str_asprintf(err, "specifier size larger than %d: %d", max_specifier_size, _attr(ctx));
+		bp::_report_warning(ctx, err.c_str());
+		// report_warning(err.c_str());
+	}
+};
+
+auto const number_ignore =
+	// NOTE: is omit the same as & (?)
+	bp::omit[bp::int_[check_number]];
+
+//*.* or 1.1 or 1 or 1. (including negative signs)
+auto const min_width_and_field_width =
+	(number_ignore | bp::lit('*')[set_min_width_flag] | bp::eps) >>
+	(bp::lit('.') >> (number_ignore | bp::lit('*')[set_field_width_flag] | bp::eps));
+
+auto const add = [](auto& ctx) {
+	ASSERT(bp::_globals(ctx).specifier == 0);
+	bp::_globals(ctx).specifier = bp::_attr(ctx);
+};
+
+// clang-format off
+auto const specifier_root_def = //bp::lit('%') I manually check for % to skip before running the parser
+	// I check the specifier first because I assume it's faster (but it might be slower)
+	 bp::eps > (any_specifier[add]
+	| (min_width_and_field_width > any_specifier[add]));
+// clang-format on
+
+BOOST_PARSER_DEFINE_RULES(specifier_root);
+
+// pass the error handler to the parent handler
+// I wonder if it would be better if I just merged the parsers instead of splitting them...
+struct format_specifier_error_handler
+{
+	explicit format_specifier_error_handler(tl_parse_state& o_)
+	: o(o_)
+	{
+	}
+
+	template<typename Iter, typename Sentinel>
+	bp::error_handler_result
+		operator()(Iter first, Sentinel last, bp::parse_error<Iter> const& e) const
+	{
+		errors_printed = true;
+
+		std::string error = "Expected ";
+		error += e.what();
+
+		o.report_error(error.c_str(), o.get_iterator() + std::distance(first, e.iter));
+		return bp::error_handler_result::fail;
+	}
+
+	// This function is for users to call within a semantic action to produce
+	// a diagnostic.
+	template<typename Context, typename Iter>
+	void diagnose(
+		bp::diagnostic_kind kind, std::string_view message, Context const& ctx, Iter it) const
+	{
+		ASSERT(*(message.data() + message.size()) == '\0');
+
+		switch(kind)
+		{
+		case bp::diagnostic_kind::error:
+			o.report_error(message.data(), o.get_iterator() + std::distance(bp::_begin(ctx), it));
+			errors_printed = true;
+			break;
+		case bp::diagnostic_kind::warning:
+			o.report_warning(message.data(), o.get_iterator() + std::distance(bp::_begin(ctx), it));
+			break;
+		}
+	}
+
+	// This is just like the other overload of diagnose(), except that it
+	// determines the Iter parameter for the other overload by calling
+	// _where(ctx).
+	template<typename Context>
+	void diagnose(bp::diagnostic_kind kind, std::string_view message, Context const& context) const
+	{
+		diagnose(kind, message, context, bp::_where(context).begin());
+	}
+
+	mutable bool errors_printed = false;
+	tl_parse_state& o;
+};
+
+} // namespace parse_printf_specifier
+
+bool tl_parse_state::find_specifier(printf_specifier_parser_state& state,
+							 std::string_view::iterator& cur,
+							 std::string_view::iterator end) {
+
+
+	auto start = cur;
+	while(cur != end)
+	{
+		cur = std::find(cur, end, '%');
+		if(cur == end)
+		{
+			ASSERT(state.specifier == 0);
+			return true;
+		}
+		state.where = cur;
+		// I could let parser take care of parsing the % specifier.
+		cur++;
+		if(cur == end)
+		{
+			report_error("% specifier reached end of string", get_iterator() + std::distance(start, cur));
+			return false;
+		}
+		if(*cur == '%')
+		{
+			// keep searching
+			++cur;
+			continue;
+		}
+		break;
+	}
+	if(cur == end)
+	{
+		ASSERT(state.specifier == 0);
+		return true;
+	}
+
+	parse_printf_specifier::format_specifier_error_handler err(*this);
+
+	auto const parse = bp::with_error_handler(bp::with_globals(parse_printf_specifier::specifier_root, state), err);
+
+	// NOTE: I could enable tracing, but it generates thousands of lines, bp::trace::on);
+	if(!bp::prefix_parse(cur, end, parse))
+	{
+		ASSERT(parse.error_handler_.errors_printed && "expected errors to be printed");
+		return false;
+	}
+	return true;
+}
+
+bool tl_parse_state::check_printf_specifiers(std::string_view key, std::string_view value, tl_buffer_type::iterator vbegin)
+{
+	// how could I annotate the offset for better errors.
+
+	auto kit = key.begin();
+	auto kend = key.end();
+	auto vit = value.begin();
+	auto vend = value.end();
+	while(kit != kend)
+	{
+		printf_specifier_parser_state key_state;
+		if(!find_specifier(key_state, kit, kend))
+		{
+			return false;
+		}
+		if(key_state.specifier == 0)
+		{
+			break;
+		}
+		if(vit != vend)
+		{
+			printf_specifier_parser_state value_state;
+			if(!find_specifier(value_state, vit, vend))
+			{
+				return false;
+			}
+			if(value_state.specifier == 0)
+			{
+				report_error("missing value specifier", vbegin);
+				return false;
+			}
+
+			// Should I add another flag, or should I treat specifier = 0 as a skip?
+			if(key_state != value_state)
+			{
+				// TODO: print this better
+				std::string message;
+				str_asprintf(message, "mismatching specifier (%d %d %d != %d %d %d)",
+							 key_state.specifier,
+							 key_state.variable_min_width_flag,
+							 key_state.variable_field_width_flag,
+							 value_state.specifier,
+							 value_state.variable_min_width_flag,
+							 value_state.variable_field_width_flag);
+				// It's funny I ONLY added annotations for the value
+				// yet it is completely broken with unicode...
+				// If the terminal / dialogs supported unicode combinations,
+				// that could be used to replace the arrow, but I don't know which glyph to use...
+				report_error(message.c_str(), vbegin + (value_state.where - value.begin()));
+
+				// if I annotated the key...
+				//report_error("from here", vbegin + (value_state.where - value.begin()));
+
+				return false;
+			}
+		}
+	}
+	// check if value has any specifiers remaining.
+	if(vit != vend)
+	{
+		printf_specifier_parser_state value_state;
+		if(!find_specifier(value_state, vit, vend))
+		{
+			return false;
+		}
+		if(value_state.specifier != 0)
+		{
+			report_error("too many specifiers for the value!");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+#endif
+
+
 namespace tl_parser
 {
 
@@ -254,9 +611,21 @@ public:
 	{
 		bp::_report_error(context, msg);
 	}
+	void report_error(const char* msg, tl_buffer_type::iterator eiter) override
+	{
+		bp::_report_error(context, msg, eiter);
+	}
 	void report_warning(const char* msg) override
 	{
 		bp::_report_warning(context, msg);
+	}
+	void report_warning(const char* msg, tl_buffer_type::iterator eiter) override
+	{
+		bp::_report_warning(context, msg, eiter);
+	}
+	tl_buffer_type::iterator get_iterator() override
+	{
+		return bp::_where(context).begin();
 	}
 };
 
@@ -376,10 +745,11 @@ auto const comment_action = [](auto& ctx) {
 // TODO: make naming more consistent...
 bp::rule<class header_lang, tl_header_tuple> const header_lang =
 	"TL_START(long_name, short_name, date, git_hash)";
-bp::rule<class tl_key_r, std::tuple<my_string_type, std::optional<my_string_type>>> const tl_key_r =
-	"TL_TEXT(text, translated_text)";
+// I don't think I need
+bp::rule<class tl_key_r, std::tuple<my_string_type, std::optional<annotated_string>>> const
+	tl_key_r = "TL_TEXT(text, translated_text)";
 #ifdef TL_ENABLE_FORMAT
-bp::rule<class tl_format_r, std::tuple<my_string_type, std::optional<my_string_type>>> const
+bp::rule<class tl_format_r, std::tuple<my_string_type, std::optional<annotated_string>>> const
 	tl_format_r = "TL_FORMAT(text, translated_text)";
 #endif
 
@@ -398,7 +768,7 @@ bp::rule<class string_char, uint32_t> const string_char =
 	"code point (code points <= U+001F must be escaped)";
 bp::rule<class single_escaped_char, uint32_t> const single_escaped_char = "'\"', '\\', 'n', or 't'";
 bp::rule<class quoted_string, my_string_type> const quoted_string = "quoted string";
-bp::rule<class nullable_quoted_string, std::optional<my_string_type>> const nullable_quoted_string =
+bp::rule<class nullable_quoted_string, std::optional<annotated_string>> const nullable_quoted_string =
 	"quoted string or NULL";
 
 bp::rule<class string_enum, std::string> const string_enum = "enum";
@@ -422,7 +792,16 @@ auto const string_char_def =
 // I would need to re-format it (pretty print) as well
 auto const quoted_string_def = bp::lexeme['"' >> *(string_char - '"') > '"'];
 
-auto const nullable_quoted_string_def = quoted_string | "NULL";
+auto add_annotation = [](auto & ctx) {
+	// store annotation
+	bp::_val(ctx) = annotated_string(bp::_where(ctx).begin(), std::move(bp::_attr(ctx)));
+};
+
+// TODO: I really want to add the annotation for NULL as well,
+//  so I have annotated_string{optional<string>,iter}
+//  I need to manually create the attribute however, since it's not automatic anymore.
+auto const nullable_quoted_string_def = quoted_string[add_annotation] | "NULL"_l;
+//auto const nullable_quoted_string_def = quoted_string | "NULL"_l;
 
 // this is not a true C compatible syntax
 auto const string_enum_def = bp::lexeme[+(bp::no_case[bp::char_('a', 'z')] | bp::char_('_'))];
@@ -445,6 +824,7 @@ auto const tl_key_r_def =
 		> quoted_string > ',' > nullable_quoted_string
 		> ')';
 #ifdef TL_ENABLE_FORMAT
+
 auto const tl_format_r_def =
 	"TL_FORMAT"_l
 		>> '('
@@ -505,77 +885,6 @@ struct logging_error_handler
 		ASSERT(filename != NULL);
 	}
 
-	template<class Iter>
-	std::string print_formatted_error(Iter first, Iter last, Iter eiter, const char* message) const
-	{
-		ASSERT(first <= last);
-		ASSERT(first <= eiter);
-		ASSERT(eiter <= last);
-		ASSERT(message != NULL);
-
-		int line_number = 1;
-		int column_number = 0;
-		std::string underlying;
-
-		auto cur = first;
-		auto newline_start = first;
-		for(; cur != eiter; ++cur)
-		{
-			if(*cur == '\n')
-			{
-				line_number++;
-				newline_start = cur + 1;
-			}
-		}
-
-		for(; cur != last; ++cur)
-		{
-			// the \r goes before the newline, which is why I ignore it above.
-			if(*cur == '\n' || *cur == '\r')
-			{
-				break;
-			}
-		}
-		underlying = std::string(newline_start, cur);
-
-		std::string result;
-		if(newline_start < eiter)
-		{
-			cur = newline_start;
-			utf8::internal::utf_error err_code;
-			do
-			{
-				uint32_t cp;
-				err_code = utf8::internal::validate_next(cur, eiter, cp);
-				switch(err_code)
-				{
-				case utf8::internal::UTF8_OK: column_number++; break;
-				default:
-					// I have not tested how this looks.
-					result = "utf8 error: ";
-					result += utf8cpp_get_error(err_code);
-					result += '\n';
-				}
-			} while(err_code == utf8::internal::UTF8_OK && cur < eiter);
-		}
-
-		str_asprintf(
-			result,
-			"%s:%d:%d: %s here%s\n"
-			"%s\n"
-			"%*s^\n",
-			filename,
-			line_number,
-			column_number,
-			message,
-			(cur == last) ? " (end of input)" : "",
-			underlying.c_str(),
-			column_number,
-			"");
-
-		return result;
-	}
-
 	// This is the function called by Boost.Parser after a parser fails the
 	// parse at an expectation point and throws a parse_error.  It is expected
 	// to create a diagnostic message, and put it where it needs to go.  In
@@ -592,7 +901,7 @@ struct logging_error_handler
 
 		std::string error = "error: Expected ";
 		error += e.what();
-		std::string message = print_formatted_error(first, last, e.iter, error.c_str());
+		std::string message = tl_parse_print_formatted_error(first, last, e.iter, error.c_str(), filename);
 
 		o.on_error(message.c_str());
 		return bp::error_handler_result::fail;
@@ -606,8 +915,7 @@ struct logging_error_handler
 	{
 		ASSERT(*(message.data() + message.size()) == '\0');
 
-		std::string result =
-			print_formatted_error(bp::_begin(context), bp::_end(context), it, message.data());
+		std::string result = tl_parse_print_formatted_error(bp::_begin(context), bp::_end(context), it, message.data(), filename);
 		switch(kind)
 		{
 		case bp::diagnostic_kind::error:

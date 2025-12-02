@@ -186,6 +186,9 @@ else()
             # this makes the C++ library similar to msvc's /MDd with checked iterators I think?
             set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -D_GLIBCXX_DEBUG)
         endif()
+    else()
+        # clang diagnostic colors with ninja?
+        ADD_CHECK_CXX_COMPILER_FLAG(MY_COMPILER_FLAGS CXX_ANSI_ESCAPE_CODES -fansi-escape-codes)
     endif()
 
     ADD_CHECK_CXX_COMPILER_FLAG(MY_COMPILER_FLAGS CXX_WARN_SUGGEST_OVERRIDE -Wsuggest-override) #not in gcc
