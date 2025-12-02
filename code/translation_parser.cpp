@@ -299,10 +299,8 @@ namespace parse_printf_specifier
 // AND it would be wrong to store the log files in binary instead of plain text, because
 // it breaks between every update, and it's possible that the log system itself crashes.
 // and that's bad because I would try to send the log with error reporting software.
-
 bp::rule<class any_specifier, int> const any_specifier = "'%c', '%s', '%d', or '%g', and etc";
-bp::rule<class specifier_root, int> const specifier_root = "'%c', '%s', '%d', or '%g', and etc";
-
+bp::rule<class specifier_root, std::optional<int>> const specifier_root = "'%c', '%s', '%d', or '%g', and etc";
 bp::symbols<int> const any_specifier_def = {
 	{"c", 1},
 	{"f", 2},
@@ -326,9 +324,14 @@ bp::symbols<int> const any_specifier_def = {
 	{"p", 8}};
 
 // a real dumb hack. I also considered using bp::transform, but it would be uglier.
-auto set_min_width_flag = [](auto& ctx) { bp::_globals(ctx).variable_min_width_flag = true; };
-auto set_field_width_flag = [](auto& ctx) { bp::_globals(ctx).variable_field_width_flag = true; };
-
+auto set_min_width_flag = [](auto& ctx) {
+	ASSERT(!bp::_globals(ctx).variable_min_width_flag);
+	bp::_globals(ctx).variable_min_width_flag = true;
+};
+auto set_field_width_flag = [](auto& ctx) {
+	ASSERT(!bp::_globals(ctx).variable_field_width_flag);
+	bp::_globals(ctx).variable_field_width_flag = true;
+};
 
 auto check_number = [](auto& ctx) {
 	// if you had control of the string, a lot worse could be done,
@@ -339,7 +342,6 @@ auto check_number = [](auto& ctx) {
 		std::string err;
 		str_asprintf(err, "specifier size larger than %d: %d", max_specifier_size, _attr(ctx));
 		bp::_report_warning(ctx, err.c_str());
-		// report_warning(err.c_str());
 	}
 };
 
@@ -352,26 +354,24 @@ auto const min_width_and_field_width =
 	(number_ignore | bp::lit('*')[set_min_width_flag] | bp::eps) >>
 	(bp::lit('.') >> (number_ignore | bp::lit('*')[set_field_width_flag] | bp::eps));
 
-auto const add = [](auto& ctx) {
+auto const add_specifier = [](auto& ctx) {
 	ASSERT(bp::_globals(ctx).specifier == 0);
 	bp::_globals(ctx).specifier = bp::_attr(ctx);
 };
 
-// clang-format off
-auto const specifier_root_def = //bp::lit('%') I manually check for % to skip before running the parser
-	// I check the specifier first because I assume it's faster (but it might be slower)
-	 bp::eps > (any_specifier[add]
-	| (min_width_and_field_width > any_specifier[add]));
-// clang-format on
+//I manually check for % before running the parser
+// I also use bp::eps > ... on bp::prefix_parse,
+// I tried to put it here, but it didn't print a nice error I think
+auto const specifier_root_def = -min_width_and_field_width >> any_specifier[add_specifier];
 
-BOOST_PARSER_DEFINE_RULES(specifier_root);
+BOOST_PARSER_DEFINE_RULES(any_specifier, specifier_root);
 
 // pass the error handler to the parent handler
 // I wonder if it would be better if I just merged the parsers instead of splitting them...
 struct format_specifier_error_handler
 {
-	explicit format_specifier_error_handler(tl_parse_state& o_)
-	: o(o_)
+	explicit format_specifier_error_handler(tl_parse_state& o_, tl_buffer_type::iterator vbegin_)
+	: o(o_), vbegin(vbegin_)
 	{
 	}
 
@@ -384,7 +384,7 @@ struct format_specifier_error_handler
 		std::string error = "Expected ";
 		error += e.what();
 
-		o.report_error(error.c_str(), o.get_iterator() + std::distance(first, e.iter));
+		o.report_error(error.c_str(), vbegin + std::distance(first, e.iter));
 		return bp::error_handler_result::fail;
 	}
 
@@ -399,11 +399,11 @@ struct format_specifier_error_handler
 		switch(kind)
 		{
 		case bp::diagnostic_kind::error:
-			o.report_error(message.data(), o.get_iterator() + std::distance(bp::_begin(ctx), it));
+			o.report_error(message.data(), vbegin + std::distance(bp::_begin(ctx), it));
 			errors_printed = true;
 			break;
 		case bp::diagnostic_kind::warning:
-			o.report_warning(message.data(), o.get_iterator() + std::distance(bp::_begin(ctx), it));
+			o.report_warning(message.data(), vbegin + std::distance(bp::_begin(ctx), it));
 			break;
 		}
 	}
@@ -419,14 +419,21 @@ struct format_specifier_error_handler
 
 	mutable bool errors_printed = false;
 	tl_parse_state& o;
+	tl_buffer_type::iterator vbegin;
 };
 
 } // namespace parse_printf_specifier
 
-bool tl_parse_state::find_specifier(printf_specifier_parser_state& state,
-							 std::string_view::iterator& cur,
-							 std::string_view::iterator end) {
-
+bool tl_parse_state::find_specifier(
+	parse_printf_specifier::printf_specifier_parser_state& state,
+	std::string_view::iterator& cur,
+	std::string_view::iterator end,
+	tl_buffer_type::iterator vbegin)
+{
+	// the other flags should be ignored if specifier == 0
+	state.specifier = 0;
+	// set to a known invalid value, so I could assert it.
+	state.where = end;
 
 	auto start = cur;
 	while(cur != end)
@@ -437,12 +444,13 @@ bool tl_parse_state::find_specifier(printf_specifier_parser_state& state,
 			ASSERT(state.specifier == 0);
 			return true;
 		}
-		state.where = cur;
-		// I could let parser take care of parsing the % specifier.
+		// I could let the parser take care of parsing the % specifier.
+		// not sure if it's worth it however...
 		cur++;
 		if(cur == end)
 		{
-			report_error("% specifier reached end of string", get_iterator() + std::distance(start, cur));
+			report_error(
+				"% specifier reached end of string", vbegin + std::distance(start, cur));
 			return false;
 		}
 		if(*cur == '%')
@@ -451,6 +459,7 @@ bool tl_parse_state::find_specifier(printf_specifier_parser_state& state,
 			++cur;
 			continue;
 		}
+		state.where = cur;
 		break;
 	}
 	if(cur == end)
@@ -459,9 +468,11 @@ bool tl_parse_state::find_specifier(printf_specifier_parser_state& state,
 		return true;
 	}
 
-	parse_printf_specifier::format_specifier_error_handler err(*this);
+	parse_printf_specifier::format_specifier_error_handler err(
+		*this, vbegin + std::distance(start, cur));
 
-	auto const parse = bp::with_error_handler(bp::with_globals(parse_printf_specifier::specifier_root, state), err);
+	auto const parse = bp::with_error_handler(
+		bp::with_globals(bp::eps > parse_printf_specifier::specifier_root, state), err);
 
 	// NOTE: I could enable tracing, but it generates thousands of lines, bp::trace::on);
 	if(!bp::prefix_parse(cur, end, parse))
@@ -469,21 +480,23 @@ bool tl_parse_state::find_specifier(printf_specifier_parser_state& state,
 		ASSERT(parse.error_handler_.errors_printed && "expected errors to be printed");
 		return false;
 	}
+	// if I set the specifier, I must have set the state.where
+	ASSERT(state.specifier != 0 || state.where == end);
+	ASSERT(state.specifier == 0 || state.where != end);
 	return true;
 }
 
 bool tl_parse_state::check_printf_specifiers(std::string_view key, std::string_view value, tl_buffer_type::iterator vbegin)
 {
-	// how could I annotate the offset for better errors.
-
 	auto kit = key.begin();
 	auto kend = key.end();
 	auto vit = value.begin();
 	auto vend = value.end();
 	while(kit != kend)
 	{
-		printf_specifier_parser_state key_state;
-		if(!find_specifier(key_state, kit, kend))
+		parse_printf_specifier::printf_specifier_parser_state key_state;
+		// TODO: i pass in get_iterator as a placeholder, it's wrong.
+		if(!find_specifier(key_state, kit, kend, get_iterator()))
 		{
 			return false;
 		}
@@ -493,8 +506,8 @@ bool tl_parse_state::check_printf_specifiers(std::string_view key, std::string_v
 		}
 		if(vit != vend)
 		{
-			printf_specifier_parser_state value_state;
-			if(!find_specifier(value_state, vit, vend))
+			parse_printf_specifier::printf_specifier_parser_state value_state;
+			if(!find_specifier(value_state, vit, vend, vbegin))
 			{
 				return false;
 			}
@@ -520,7 +533,7 @@ bool tl_parse_state::check_printf_specifiers(std::string_view key, std::string_v
 				// yet it is completely broken with unicode...
 				// If the terminal / dialogs supported unicode combinations,
 				// that could be used to replace the arrow, but I don't know which glyph to use...
-				report_error(message.c_str(), vbegin + (value_state.where - value.begin()));
+				report_error(message.c_str(), vbegin + std::distance(value.begin(), value_state.where));
 
 				// if I annotated the key...
 				//report_error("from here", vbegin + (value_state.where - value.begin()));
@@ -532,14 +545,14 @@ bool tl_parse_state::check_printf_specifiers(std::string_view key, std::string_v
 	// check if value has any specifiers remaining.
 	if(vit != vend)
 	{
-		printf_specifier_parser_state value_state;
-		if(!find_specifier(value_state, vit, vend))
+		parse_printf_specifier::printf_specifier_parser_state value_state;
+		if(!find_specifier(value_state, vit, vend, vbegin))
 		{
 			return false;
 		}
 		if(value_state.specifier != 0)
 		{
-			report_error("too many specifiers for the value!");
+			report_error("too many specifiers for the value!", vbegin);
 			return false;
 		}
 	}
@@ -792,9 +805,10 @@ auto const string_char_def =
 // I would need to re-format it (pretty print) as well
 auto const quoted_string_def = bp::lexeme['"' >> *(string_char - '"') > '"'];
 
-auto add_annotation = [](auto & ctx) {
-	// store annotation
-	bp::_val(ctx) = annotated_string(bp::_where(ctx).begin(), std::move(bp::_attr(ctx)));
+auto add_annotation = [](auto& ctx) {
+	// store annotation, I do +1 because it includes the quotations.
+	// I could technically add the annotation directly inside the quoted string to avoid that.
+	bp::_val(ctx) = annotated_string(bp::_where(ctx).begin() + 1, std::move(bp::_attr(ctx)));
 };
 
 // TODO: I really want to add the annotation for NULL as well,
