@@ -178,108 +178,6 @@ std::string tl_parse_print_formatted_error(
 namespace bp = boost::parser;
 
 #ifdef TL_ENABLE_FORMAT
-#if 0
-bool tl_parse_state::check_printf_specifiers(std::string_view key_, std::string_view value_)
-{
-	const char *key = key_.data();
-	const char *value = value_.data();
-	// count the number, so I can print it.
-	int key_count = 0;
-	int value_count = 0;
-	const char* found_key = key;
-	const char* found_value = value;
-	do
-	{
-		// this would probably be simpler & faster if I didn't use strchr...
-		if(found_key != nullptr) found_key = strchr(found_key, '%');
-		if(found_value != nullptr) found_value = strchr(found_value, '%');
-		if(found_key != nullptr)
-		{
-			switch(found_key[1])
-			{
-			case 'f':
-			case 'F':
-			case 'g':
-			case 'G':
-			case 'e':
-			case 'E':
-				// above are all floats, I want to allow mixing, but it does not matter.
-			case '%':
-			case 'd':
-			case 'u':
-			case 's':
-			case 'c':
-			case 'x':
-			case 'X':
-			case 'p':
-				if(found_value != nullptr && found_key[1] != found_value[1])
-				{
-					std::string str;
-					str_asprintf(
-						str,
-						// TODO: use utf8::internal::validate_next to check + print range...
-						(found_value[1] >= 0 && found_value[1] <= 0x001fu)
-							// control codes are not possible because quoted_string checks.
-							? "mismatching %% format specifier! (%%%c != #%d) NOTE: control codes should not be possible\n"
-							: "mismatching %% format specifier! (%%%c != %%%c)\n",
-						found_key[1],
-						found_value[1]);
-					report_error(str.c_str());
-					return false;
-				}
-				break;
-			default: {
-				std::string str;
-				str_asprintf(
-					str,
-					(found_key[1] >= 0 && found_key[1] <= 0x001fu)
-						? "unknown key %% format specifier! (#%d) NOTE: control codes should not be possible\n"
-						: "unknown key %% format specifier! (%%%c)\n",
-					found_key[1]);
-				report_error(str.c_str());
-				return false;
-			}
-			}
-		}
-
-		if(found_key != nullptr)
-		{
-			found_key++;
-			if(*(found_key) == '%')
-			{
-				found_key++;
-			}
-			key_count++;
-		}
-		if(found_value != nullptr)
-		{
-			found_value++;
-			if(*(found_value) == '%')
-			{
-				found_value++;
-			}
-			value_count++;
-		}
-	} while(found_key != nullptr || found_value != nullptr);
-
-	if(key_count != value_count)
-	{
-		std::string str;
-		str_asprintf(
-			str, "mismatching %% format specifier count! (%d != %d)\n", key_count, value_count);
-		report_error(str.c_str());
-		return false;
-	}
-
-	if(key_count == 0)
-	{
-		report_warning("no % specifiers found for printf style format\n");
-	}
-
-	return true;
-}
-#endif
-
 namespace parse_printf_specifier
 {
 
@@ -300,7 +198,7 @@ namespace parse_printf_specifier
 // it breaks between every update, and it's possible that the log system itself crashes.
 // and that's bad because I would try to send the log with error reporting software.
 bp::rule<class any_specifier, int> const any_specifier = "'%c', '%s', '%d', or '%g', and etc";
-bp::rule<class specifier_root, std::optional<int>> const specifier_root =
+bp::rule<class specifier_root> const specifier_root =
 	"'%c', '%s', '%d', or '%g', and etc";
 bp::symbols<int> const any_specifier_def = {
 	{"c", 1},
@@ -350,10 +248,19 @@ auto const number_ignore =
 	// NOTE: is omit the same as & (?)
 	bp::omit[bp::int_[check_number]];
 
-//*.* or 1.1 or 1 or 1. (including negative signs)
+//%*.* or %1.1 or %1 or %1. (including negative signs)
 auto const min_width_and_field_width =
 	(number_ignore | bp::lit('*')[set_min_width_flag] | bp::eps) >>
 	(bp::lit('.') >> (number_ignore | bp::lit('*')[set_field_width_flag] | bp::eps));
+#if 0
+// I thought that %.s was an error, but it just sets the width to 0 which means nothing is printed.
+bp::rule<class field_width> const field_width =
+	"expected a field width number or * after '.'";
+auto const field_width_def = number_ignore | bp::lit('*')[set_field_width_flag];
+auto const min_width_and_field_width =
+	((number_ignore | bp::lit('*')[set_min_width_flag]) >> (bp::lit('.') >> -field_width)) |
+	(bp::lit('.') > field_width);
+#endif
 
 auto const add_specifier = [](auto& ctx) {
 	ASSERT(bp::_globals(ctx).specifier == 0);
@@ -515,7 +422,7 @@ bool tl_parse_state::check_printf_specifiers(
 			}
 			if(value_state.specifier == 0)
 			{
-				report_error("missing value specifier", vbegin);
+				report_error("missing % specifier", vbegin);
 				return false;
 			}
 
@@ -526,7 +433,7 @@ bool tl_parse_state::check_printf_specifiers(
 				std::string message;
 				str_asprintf(
 					message,
-					"mismatching specifier (%d %d %d != %d %d %d)",
+					"mismatching % specifier (%d %d %d != %d %d %d)",
 					key_state.specifier,
 					key_state.variable_min_width_flag,
 					key_state.variable_field_width_flag,
@@ -557,7 +464,7 @@ bool tl_parse_state::check_printf_specifiers(
 		}
 		if(value_state.specifier != 0)
 		{
-			report_error("too many specifiers for the value!", vbegin);
+			report_error("too many % specifiers for the value!", vbegin);
 			return false;
 		}
 	}

@@ -690,11 +690,21 @@ TL_RESULT translation_context::on_format(std::string& key, std::optional<annotat
 		return TL_RESULT::SUCCESS;
 	}
 
+//#define CHECK_printf_TIMER
+#ifdef CHECK_printf_TIMER
+	TIMER_U t1 = timer_now();
+#endif
+
 	// check printf specifiers
 	if(!tl_parser_ctx->check_printf_specifiers(key, value->data, value->iter))
 	{
 		return TL_RESULT::FAILURE;
 	}
+#ifdef CHECK_printf_TIMER
+	TIMER_U t2 = timer_now();
+	slogf("check_printf_time: %" TIMER_FMT "\n", timer_delta_ms(t1, t2));
+#endif
+
 
 	format_table.set_index(index, value->data);
 
