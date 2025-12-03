@@ -71,7 +71,7 @@ inline bool escape_string(std::string& output_string, std::string_view input_str
 			break;
 		default:
 			// if it is a control code.
-			if(c >= 0 && c <= 0x001fu)
+			if(c >= 0 && c <= 0x001f)
 			{
 				serrf(
 					"got a unexpected control code, got: #%d, offset: %zu\n",
@@ -104,7 +104,7 @@ inline bool rem_escape_string(char* input_string)
 			case '\\': input_string[j] = '\\'; break;
 			case '\0': serr("expected escape code, got null\n"); return false;
 			default:
-				if(input_string[i] >= 0 && input_string[i] <= 0x001fu)
+				if(input_string[i] >= 0 && input_string[i] <= 0x001f)
 				{
 					serrf("expected escape code, got: #%d, offset: %d\n", input_string[i], i);
 					return false;
@@ -114,7 +114,7 @@ inline bool rem_escape_string(char* input_string)
 			}
 		}
 		// if it's an escape code.
-		if(input_string[i] >= 0 && input_string[i] <= 0x001fu)
+		if(input_string[i] >= 0 && input_string[i] <= 0x001f)
 		{
 			serrf(
 				"code points <= U+001F must be escaped, got: #%d, offset: %d\n",
