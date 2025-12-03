@@ -4,7 +4,8 @@
 #include "../../code/translation_parser.h"
 #include "../../code/util/string_tools.h"
 
-// NOLINTBEGIN(*-container-contains)
+// I should probably globally disable these.
+// NOLINTBEGIN(*-container-contains, *-unnecessary-value-param, *-for-range-copy)
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -129,10 +130,13 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 	load_ast_handler* patch_file = nullptr;
 
 	// TODO: rename this to ast_iter
-	typedef decltype(ast_root)::iterator iter_type;
-	typedef decltype(ast_root)::const_iterator c_iter_type;
+	typedef decltype(ast_root)::iterator ast_iter;
+	typedef decltype(ast_root)::const_iterator c_ast_iter;
 
-	bool is_patch_file()const{return patch_file == nullptr;}
+	bool is_patch_file() const
+	{
+		return patch_file == nullptr;
+	}
 
 	void on_warning(const char* msg) override
 	{
@@ -150,13 +154,17 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 		return TL_RESULT::SUCCESS;
 	}
 
-
-	TL_RESULT on_insert(tl_parse_state& tl_state, std::string& key, std::optional<annotated_string>& value, bool format)
+	TL_RESULT on_insert(
+		tl_parse_state& tl_state,
+		std::string& key,
+		std::optional<annotated_string>& value,
+		bool format)
 	{
 		// NOTE: is the key captured as a reference or a copy if I [key]?
-		auto find_it = std::find_if(ast_root.begin(), ast_root.end(), [&key](const entry_ast& ast) -> bool {
-			return ast.key == key;
-		});
+		auto find_it =
+			std::find_if(ast_root.begin(), ast_root.end(), [&key](const entry_ast& ast) -> bool {
+				return ast.key == key;
+			});
 
 		if(find_it != ast_root.end())
 		{
@@ -245,11 +253,13 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 	}
 	void report_error(const char* msg, tl_buffer_type::iterator eiter) override
 	{
+		(void) eiter;
 		formatting_error_message = msg;
 		info(msg);
 	}
 	void report_warning(const char* msg, tl_buffer_type::iterator eiter) override
 	{
+		(void) eiter;
 		info(msg);
 	}
 	tl_buffer_type::iterator get_iterator() override
@@ -258,38 +268,38 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 	}
 
 	// this is for merging key to key.
-	bool check_printf(c_iter_type missing_patch, iter_type missing_old_text)
+	bool check_printf(
+		c_ast_iter missing_patch, ast_iter missing_old_text) // NOLINT(*-unnecessary-value-param)
 	{
 		ASSERT(!is_patch_file());
 		ASSERT(missing_patch->format_text);
 		ASSERT(missing_old_text->format_text);
 		formatting_iter = missing_old_text->where;
-		if(!check_printf_specifiers(missing_patch->key, missing_old_text->key, missing_old_text->where))
+		if(!check_printf_specifiers(
+			   missing_patch->key, missing_old_text->key, missing_old_text->where))
 		{
 			ASSERT(formatting_error_message.has_value());
 			missing_old_text->error_comment = *formatting_error_message;
 			// TODO: gotta add the file data...
-			//wrapper.where = missing_patch->where;
-			//wrapper.report_error("from here");
+			// wrapper.where = missing_patch->where;
+			// wrapper.report_error("from here");
 			return false;
 		}
 		return true;
 	}
 
 	// This is messy, not too happy about it.
-	template<bool merge_to, class T>
-	static std::vector<T> find_missing(std::vector<entry_ast>& to, std::vector<entry_ast>& from)
+	template<class T>
+	static std::vector<T> find_missing(std::vector<entry_ast>& to, std::vector<entry_ast>& from, bool merge_to)
 	{
 		std::vector<T> missing;
 		for(auto it = from.begin(); it != from.end(); ++it)
 		{
-			auto find_it =
-				std::find_if(to.begin(), to.end(), [it](const entry_ast& ast) -> bool {
-					return ast.key == it->key;
-				});
+			auto find_it = std::find_if(to.begin(), to.end(), [it](const entry_ast& ast) -> bool {
+				return ast.key == it->key && ast.format_text != it->format_text;
+			});
 			if(find_it != to.end())
 			{
-				ASSERT(find_it->format_text == it->format_text && "this should have been already checked during parsing!");
 				if(merge_to)
 				{
 					find_it->extra.clear();
@@ -304,7 +314,6 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 		return missing;
 	}
 
-
 	enum class merge_result
 	{
 		MATCH_FOUND,
@@ -316,8 +325,8 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 		MATCH_FAILURE
 	};
 
-	//returns true if merged.
-	merge_result auto_merge(c_iter_type missing_patch, iter_type missing_old_text)
+	// returns true if merged.
+	merge_result auto_merge(c_ast_iter missing_patch, ast_iter missing_old_text)
 	{
 		if(missing_patch->format_text != missing_old_text->format_text)
 		{
@@ -329,19 +338,19 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 			if(!check_printf(missing_patch, missing_old_text))
 			{
 				// TODO: make this only for werror
-				//return merge_result::MATCH_FAILURE;
+				// return merge_result::MATCH_FAILURE;
 				return merge_result::MATCH_NOT_FOUND;
 			}
 		}
 
-		for(const auto &extra : missing_old_text->extra)
+		for(auto& extra : missing_old_text->extra)
 		{
-			const auto *info_result = std::get_if<tl_info>(&extra);
+			const auto* info_result = std::get_if<tl_info>(&extra);
 			if(info_result != nullptr)
 			{
-				for(auto& jextra : missing_patch->extra)
+				for(const auto& jextra : missing_patch->extra)
 				{
-					auto* jinfo_result = std::get_if<tl_info>(&jextra);
+					const auto* jinfo_result = std::get_if<tl_info>(&jextra);
 					if(jinfo_result != nullptr)
 					{
 						if(info_result->source_file != jinfo_result->source_file)
@@ -373,9 +382,11 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 
 		// possibly new translations or failed to match.
 		// note that all the iterators come from the second parameter.
-		std::vector<c_iter_type> missing_patches = find_missing<true, c_iter_type>(ast_root, patch_file->ast_root);
+		std::vector<c_ast_iter> missing_patches =
+			find_missing<c_ast_iter>(ast_root, patch_file->ast_root, true);
 		// possibly removed text or failed to match
-		std::vector<iter_type> missing_old_text = find_missing<false, iter_type>(patch_file->ast_root, ast_root);
+		std::vector<ast_iter> missing_old_text =
+			find_missing<ast_iter>(patch_file->ast_root, ast_root, false);
 
 		/*
 		for(auto it : missing_patches)
@@ -387,9 +398,9 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 			info(it->key.c_str());
 		}*/
 		bool success = true;
-		auto rem_it = std::remove_if(
-			missing_old_text.begin(), missing_old_text.end(), [&](auto it) {
-				for(auto &jt : missing_patches)
+		auto rem_it =
+			std::remove_if(missing_old_text.begin(), missing_old_text.end(), [&](auto it) {
+				for(auto& jt : missing_patches)
 				{
 					if(jt == patch_file->ast_root.end())
 					{
@@ -405,11 +416,10 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 						// mark for deletion.
 						jt = patch_file->ast_root.end();
 						return true;
-					case merge_result::MATCH_NOT_FOUND: break;
+					case merge_result::MATCH_NOT_FOUND:
+						break;
 						// TODO: I think this will only be fore werror
-					case merge_result::MATCH_FAILURE:
-						success = false;
-						return false;
+					case merge_result::MATCH_FAILURE: success = false; return false;
 					}
 				}
 				return false;
@@ -429,9 +439,9 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 		for(auto it : missing_old_text)
 		{
 			bool found = false;
-			for(auto &extra : it->extra)
+			for(auto& extra : it->extra)
 			{
-				auto *result = std::get_if<tl_no_match>(&extra);
+				auto* result = std::get_if<tl_no_match>(&extra);
 				if(result != nullptr)
 				{
 					found = true;
@@ -440,7 +450,7 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 			}
 			if(!found)
 			{
-				it->extra.insert(it->extra.begin(),tl_no_match{header.date,header.git_hash});
+				it->extra.insert(it->extra.begin(), tl_no_match{header.date, header.git_hash});
 			}
 		}
 
@@ -465,13 +475,14 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 		// but this should still be good for sanity for the parser.
 		if(!extra_stack.empty())
 		{
-			serrf("Error expected TL() before TL_END(), leftover values! (%zu)\n", extra_stack.size());
+			serrf(
+				"Error expected TL() before TL_END(), leftover values! (%zu)\n",
+				extra_stack.size());
 			return false;
 		}
 		return true;
 	}
 };
-
 
 #define checked_fprintf(file, ...)                   \
 	do                                               \
@@ -482,7 +493,7 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 			return false;                            \
 		}                                            \
 	} while(0)
-#define checked_fputs(text, file)                 \
+#define checked_fputs(text, file)                  \
 	do                                             \
 	{                                              \
 		if(fputs(text, file) < 0)                  \
@@ -539,29 +550,27 @@ struct format_ast_visitor
 	}
 };
 
-
 // TODO: I should add a string for the file name for better errors.
 static bool dump_formatted_ast(FILE* file, std::vector<entry_ast>& ast_root, tl_header& header)
 {
 	checked_fputs("// this is a file generated by merge-strings\n\n", file);
 
 	// TODO: I don't check for escaped strings, but I should make that a parser rule.
-	checked_fprintf(file,
-		   "TL_START(%s, %s, \"%s\", \"%s\", \"%s\")\n\n",
-		   header.long_name.c_str(),
-		   header.short_name.c_str(),
-		   header.native_name.c_str(),
-		   header.date.c_str(),
-		   header.git_hash.c_str());
+	checked_fprintf(
+		file,
+		"TL_START(%s, %s, \"%s\", \"%s\", \"%s\")\n\n",
+		header.long_name.c_str(),
+		header.short_name.c_str(),
+		header.native_name.c_str(),
+		header.date.c_str(),
+		header.git_hash.c_str());
 
 	format_ast_visitor astVisitor(file);
 	for(auto& entry : ast_root)
 	{
 		if(!entry.error_comment.empty())
 		{
-			checked_fprintf(
-				file,"// TL_ERROR(%s)\n\n",
-				entry.error_comment.c_str());
+			checked_fprintf(file, "// TL_ERROR(%s)\n\n", entry.error_comment.c_str());
 		}
 		for(auto& extra : entry.extra)
 		{
@@ -594,10 +603,10 @@ static bool dump_formatted_ast(FILE* file, std::vector<entry_ast>& ast_root, tl_
 		}
 
 		checked_fprintf(
-			   file,
-			   entry.format_text ? "TL_FORMAT(\"%s\", %s)\n\n" : "TL_TEXT(\"%s\", %s)\n\n",
-			   key_buffer.c_str(),
-			   value_buffer.c_str());
+			file,
+			entry.format_text ? "TL_FORMAT(\"%s\", %s)\n\n" : "TL_TEXT(\"%s\", %s)\n\n",
+			key_buffer.c_str(),
+			value_buffer.c_str());
 	}
 	checked_fputs("TL_END()\n", file);
 
@@ -628,7 +637,6 @@ static bool dump_formatted_ast(FILE* file, std::vector<entry_ast>& ast_root, tl_
 #endif
 #endif
 
-
 static bool slurp_stdio(std::string& out, FILE* fp, const char* name)
 {
 	ASSERT(fp != NULL);
@@ -642,22 +650,14 @@ static bool slurp_stdio(std::string& out, FILE* fp, const char* name)
 	int ret = _fstat(_fileno(fp), &info);
 	if(ret != 0)
 	{
-		serrf(
-			"fstat error: `%s`, reason: %s (return: %d)\n",
-			name,
-			strerror(errno),
-			ret);
+		serrf("fstat error: `%s`, reason: %s (return: %d)\n", name, strerror(errno), ret);
 		return false;
 	}
 	out.resize(info.st_size);
 	size_t bytes_read = fread(out.data(), 1, info.st_size, fp);
 	if(bytes_read != info.st_size)
 	{
-		serrf(
-			"fread error: `%s`, reason: %s (return: %zu)\n",
-			name,
-			strerror(errno),
-			bytes_read);
+		serrf("fread error: `%s`, reason: %s (return: %zu)\n", name, strerror(errno), bytes_read);
 		return false;
 	}
 
@@ -670,10 +670,7 @@ static bool slurp_file(std::string& out, const char* path)
 	FILE* fp = fopen(path, "rb");
 	if(fp == nullptr)
 	{
-		serrf(
-			"Failed to read `%s`, reason: %s\n",
-			path,
-			strerror(errno));
+		serrf("Failed to read `%s`, reason: %s\n", path, strerror(errno));
 		return false;
 	}
 	bool success = slurp_stdio(out, fp, path);
@@ -782,7 +779,6 @@ static bool load_translation_ast()
 
 	std::string merge_patch = res["patch"].as<std::string>();
 
-
 	load_ast_handler patch_ast;
 
 	infof("info: loading patch: %s\n", merge_patch.c_str());
@@ -840,7 +836,7 @@ static bool load_translation_ast()
 	}
 
 	std::optional<std::string> stage_directory;
-	if (res.count("stage_dir") != 0)
+	if(res.count("stage_dir") != 0)
 	{
 		stage_directory = res["stage_dir"].as<std::string>();
 		const char* dir_path = stage_directory->c_str();
@@ -864,7 +860,6 @@ static bool load_translation_ast()
 	{
 		// TODO: I could use the log, since I just use the positional variables...
 		infof("info: loading: %s\n", path.c_str());
-
 
 		load_ast_handler ast;
 		ast.patch_file = &patch_ast;
@@ -910,7 +905,6 @@ static bool load_translation_ast()
 		{
 			return false;
 		}
-
 	}
 
 	return true;
@@ -949,7 +943,6 @@ int main(int argc, char** argv)
 		g_use_werror = true;
 	}
 
-
 	if(res.count("tool") > 1)
 	{
 		werrf("--tool called more than once = %d\n", res.count("tool"));
@@ -969,4 +962,4 @@ int main(int argc, char** argv)
 
 	return 0;
 }
-// NOLINTEND(*-container-contains)
+// NOLINTEND(*-container-contains, *-unnecessary-value-param, *-for-range-copy)
