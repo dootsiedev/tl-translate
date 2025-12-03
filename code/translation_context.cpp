@@ -489,7 +489,7 @@ void translation_context::on_warning(const char* msg)
 	slog(msg);
 }
 
-TL_RESULT translation_context::on_header(tl_header& header)
+TL_RESULT translation_context::on_header(tl_parse_state& tl_state, tl_header& header)
 {
 	if(parse_headers)
 	{
@@ -512,7 +512,7 @@ TL_RESULT translation_context::on_header(tl_header& header)
 		{
 			std::string msg;
 			str_asprintf(msg, "expected english (got: %s)\n", found_short.c_str());
-			tl_parser_ctx->report_error(msg.c_str());
+			tl_state.report_error(msg.c_str());
 			return TL_RESULT::FAILURE;
 		}
 		return TL_RESULT::SUCCESS;
@@ -527,7 +527,7 @@ TL_RESULT translation_context::on_header(tl_header& header)
 			"unexpected language (expected: %s, got: %s)\n",
 			expected.c_str(),
 			found_short.c_str());
-		tl_parser_ctx->report_error(msg.c_str());
+		tl_state.report_error(msg.c_str());
 		return TL_RESULT::FAILURE;
 	}
 #endif
@@ -612,7 +612,7 @@ bool translation_context::translation_table::validate_translation(const char* la
 	return true;
 }
 
-TL_RESULT translation_context::on_translation(std::string& key, std::optional<annotated_string>& value)
+TL_RESULT translation_context::on_translation(tl_parse_state& tl_state, std::string& key, std::optional<annotated_string>& value)
 {
 	if(parse_headers)
 	{
@@ -624,14 +624,14 @@ TL_RESULT translation_context::on_translation(std::string& key, std::optional<an
 	if(index == 0)
 	{
 		// TODO: make tl-string extractor add NO_MATCH, and ignore it?
-		tl_parser_ctx->report_warning("text does not exist");
+		tl_state.report_warning("text does not exist");
 		return TL_RESULT::WARNING;
 	}
 	ASSERT(index < text_table.translations.size());
 	if(text_table.translations[index] != 0)
 	{
 		text_table.set_index(index, key);
-		tl_parser_ctx->report_warning("duplicate entry");
+		tl_state.report_warning("duplicate entry");
 		return TL_RESULT::WARNING;
 	}
 
@@ -641,7 +641,7 @@ TL_RESULT translation_context::on_translation(std::string& key, std::optional<an
 		// ignore english, there is no translation.
 		if(current_lang != -1)
 		{
-			tl_parser_ctx->report_warning("untranslated");
+			tl_state.report_warning("untranslated");
 			return TL_RESULT::WARNING;
 		}
 		return TL_RESULT::SUCCESS;
@@ -654,7 +654,8 @@ TL_RESULT translation_context::on_translation(std::string& key, std::optional<an
 
 #ifdef TL_ENABLE_FORMAT
 
-TL_RESULT translation_context::on_format(std::string& key, std::optional<annotated_string>& value)
+TL_RESULT translation_context::on_format(
+	tl_parse_state& tl_state, std::string& key, std::optional<annotated_string>& value)
 {
 	// TODO: copy paste, I think I could make the format validator part of the parser?
 	if(parse_headers)
@@ -667,14 +668,14 @@ TL_RESULT translation_context::on_format(std::string& key, std::optional<annotat
 	if(index == 0)
 	{
 		// TODO: make tl-string extractor add NO_MATCH, and ignore it?
-		tl_parser_ctx->report_warning("format text does not exist");
+		tl_state.report_warning("format text does not exist");
 		return TL_RESULT::WARNING;
 	}
 	ASSERT(index < format_table.translations.size());
 	if(format_table.translations[index] != 0)
 	{
 		format_table.set_index(index, key);
-		tl_parser_ctx->report_warning("duplicate format entry");
+		tl_state.report_warning("duplicate format entry");
 		return TL_RESULT::WARNING;
 	}
 
@@ -684,7 +685,7 @@ TL_RESULT translation_context::on_format(std::string& key, std::optional<annotat
 		// ignore english, there is no translation.
 		if(current_lang != -1)
 		{
-			tl_parser_ctx->report_warning("untranslated format entry");
+			tl_state.report_warning("untranslated format entry");
 			return TL_RESULT::WARNING;
 		}
 		return TL_RESULT::SUCCESS;
@@ -696,7 +697,7 @@ TL_RESULT translation_context::on_format(std::string& key, std::optional<annotat
 #endif
 
 	// check printf specifiers
-	if(!tl_parser_ctx->check_printf_specifiers(key, value->data, value->iter))
+	if(!tl_state.check_printf_specifiers(key, value->data, value->iter))
 	{
 		return TL_RESULT::FAILURE;
 	}

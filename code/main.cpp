@@ -8,11 +8,34 @@
 
 #include "core/asan_helper.h"
 
+#ifdef WIN_UNICODE_HACK
+#include <fcntl.h>
+#include <io.h>
+#include <stdio.h>
+#endif
 int main(int argc, char** argv)
 {
 #ifdef MY_HAS_ASAN
 	init_asan();
 #endif
+
+#ifdef WIN_UNICODE_HACK
+	_setmode(_fileno(stdout), _O_U8TEXT);
+#endif
+
+	#if 0 //def _WIN32
+		// With conemu, I get an address sanitizer error UNLESS I check GetACP
+		// it points to <unknown module> at address 0
+		// you can just enable the Beta: Use Unicode UTF-8 for worldwide language support
+		// or use chcp 65001
+		// and I believe that if you had a Japanese Locale, japanese text should print fine.
+		if(SetConsoleOutputCP(CP_UTF8) == FALSE)
+		{
+			slogf(
+				"SetConsoleOutputCP(CP_UTF8) error: %s\n",
+				WIN_GetFormattedGLE(GetLastError()).c_str());
+		}
+	#endif
 
 	switch(load_cvar(argc, argv))
 	{
@@ -20,20 +43,6 @@ int main(int argc, char** argv)
 	case CVAR_LOAD::ERROR: show_error("cvar error", serr_get_error().c_str()); return 1;
 	case CVAR_LOAD::CLOSE: return 0;
 	}
-
-#if 0 //def _WIN32
-	// With conemu, I get an address sanitizer error UNLESS I check GetACP
-	// it points to <unknown module> at address 0
-	// you can just enable the Beta: Use Unicode UTF-8 for worldwide language support
-	// or use chcp 65001
-	// and I believe that if you had a Japanese Locale, japanese text should print fine.
-	if(SetConsoleOutputCP(CP_UTF8) == FALSE)
-	{
-		slogf(
-			"SetConsoleOutputCP(CP_UTF8) error: %s\n",
-			WIN_GetFormattedGLE(GetLastError()).c_str());
-	}
-#endif
 
 	if(!get_translation_context().init())
 	{

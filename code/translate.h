@@ -22,20 +22,21 @@ const char* translate_gettext(const char* text, tl_index index);
 	}()
 #ifdef TL_ENABLE_FORMAT
 const char* translate_get_format(const char* text, tl_index index);
-// Translating formatted strings is a big NO NO for security,
-// -Wformat-security will complain (but compile time translations + asprintf_t() might work?)
+// Translating formatted strings is a big NO NO for security, -Wformat-security will complain
+// (if I made translate_get_format constexpr, maybe it will suppress it? But that's awful...
+// or I could make a dummy call all the translations with printf,
+// but this will not suppress Wformat-security... I need to disable it...)
 // if a hacker hacked your translations, they can easily cause the code to segfault / or more.
-// but... the workaround is so ugly that it gets in the way of quality of life translations...
+// but... the workaround is so ugly that it gets in the way of translations...
 // SO, instead I manually check the format specifiers, and make sure they match (during init).
-// Unfortunately this API is terrible and I hate it,
-// also note diagnostic warnings on MSVC requires /ANALYZE (I could use printf for the dummy)
+// also note slogf type checking on MSVC requires /ANALYZE, so I use printf for the dummy.
 #define slogf_T(fmt, ...)                                     \
 	do                                                        \
 	{                                                         \
 		if(0)                                                 \
 		{                                                     \
 			/* get diagnostic warnings */                     \
-			slogf(fmt, __VA_ARGS__);                          \
+			printf(fmt, __VA_ARGS__);                         \
 		}                                                     \
 		constexpr auto index = get_format_index(fmt);         \
 		static_assert(index != 0, "translation not found");   \
@@ -47,7 +48,7 @@ const char* translate_get_format(const char* text, tl_index index);
 		if(0)                                                             \
 		{                                                                 \
 			/* get diagnostic warnings */                                 \
-			str_asprintf(str, fmt, __VA_ARGS__);                          \
+			printf(fmt, __VA_ARGS__);                                     \
 		}                                                                 \
 		constexpr auto index = get_format_index(fmt);                     \
 		static_assert(index != 0, "translation not found");               \

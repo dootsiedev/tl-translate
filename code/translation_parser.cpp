@@ -64,6 +64,7 @@
 #include "core/global.h"
 
 #include "util/string_tools.h"
+#include "util/utf8_stuff.h"
 
 // custom assert, boost parser also has BOOST_PARSER_NO_RUNTIME_ASSERTIONS
 // which uses static assert, which is better, but why is it not always enabled?
@@ -74,21 +75,17 @@
 #define BOOST_ASSERT ASSERT
 #endif
 
-// remove this when done.
+// I was hoping turning this off would speed up compilation time... nope.
+//#ifndef TL_COMPILE_TIME_ASSERTS
+//#define BOOST_PARSER_NO_RUNTIME_ASSERTIONS
+//#endif
+
 // #define BOOST_PARSER_TRACE_TO_VS_OUTPUT
 
 // I was really hoping boost parser is just built different
 // but nope, it takes seconds for clangd to catch up.
 #include <boost/parser/parser.hpp>
 
-// for parser | bp::as_utf8, it makes the column location unicode aware
-// (but the terminal needs a fixed width font, and windows default terminals wont print it utf8)
-// #include <boost/parser/transcode_view.hpp>
-
-#include "util/utf8_stuff.h"
-
-#include <sstream>
-#include <ranges>
 // NOLINTBEGIN (bugprone-chained-comparison, google-readability-casting,
 // bugprone-easily-swappable-parameters)
 #ifdef __clang__
@@ -177,6 +174,7 @@ std::string tl_parse_print_formatted_error(
 
 namespace bp = boost::parser;
 
+// TODO: do some benchmarks or something to see how bad it is.
 #ifdef TL_ENABLE_FORMAT
 namespace parse_printf_specifier
 {
@@ -197,10 +195,10 @@ namespace parse_printf_specifier
 // AND it would be wrong to store the log files in binary instead of plain text, because
 // it breaks between every update, and it's possible that the log system itself crashes.
 // and that's bad because I would try to send the log with error reporting software.
-bp::rule<class any_specifier, int> const any_specifier = "'%c', '%s', '%d', or '%g', and etc";
+//bp::rule<class any_specifier, int> const any_specifier = "'%c', '%s', '%d', or '%g', and etc";
 bp::rule<class specifier_root> const specifier_root =
 	"'%c', '%s', '%d', or '%g', and etc";
-bp::symbols<int> const any_specifier_def = {
+bp::symbols<int> const any_specifier = {
 	{"c", 1},
 	{"f", 2},
 	{"F", 2},
@@ -236,10 +234,10 @@ auto check_number = [](auto& ctx) {
 	// if you had control of the string, a lot worse could be done,
 	// but I assume this is an error
 	const int max_specifier_size = 1000;
-	if(std::abs(_attr(ctx)) > max_specifier_size)
+	if(std::abs(bp::_attr(ctx)) > max_specifier_size)
 	{
 		std::string err;
-		str_asprintf(err, "specifier size larger than %d: %d", max_specifier_size, _attr(ctx));
+		str_asprintf(err, "specifier size larger than %d: %d", max_specifier_size, bp::_attr(ctx));
 		bp::_report_warning(ctx, err.c_str());
 	}
 };
@@ -272,7 +270,7 @@ auto const add_specifier = [](auto& ctx) {
 //  I tried to put it here, but it didn't print a nice error I think
 auto const specifier_root_def = -min_width_and_field_width >> any_specifier[add_specifier];
 
-BOOST_PARSER_DEFINE_RULES(any_specifier, specifier_root);
+BOOST_PARSER_DEFINE_RULES(specifier_root);
 
 // pass the error handler to the parent handler
 // I wonder if it would be better if I just merged the parsers instead of splitting them...
@@ -354,7 +352,8 @@ bool tl_parse_state::find_specifier(
 			return true;
 		}
 		// I could let the parser take care of parsing the % specifier.
-		// not sure if it's worth it however...
+		// and I could also make it skip for me,
+		// but I really want to avoid expanding the compile time and size.
 		cur++;
 		if(cur == end)
 		{
@@ -433,7 +432,7 @@ bool tl_parse_state::check_printf_specifiers(
 				std::string message;
 				str_asprintf(
 					message,
-					"mismatching % specifier (%d %d %d != %d %d %d)",
+					"mismatching %% specifier (%d %d %d != %d %d %d)",
 					key_state.specifier,
 					key_state.variable_min_width_flag,
 					key_state.variable_field_width_flag,
@@ -442,8 +441,6 @@ bool tl_parse_state::check_printf_specifiers(
 					value_state.variable_field_width_flag);
 				// It's funny I ONLY added annotations for the value
 				// yet it is completely broken with unicode...
-				// If the terminal / dialogs supported unicode combinations,
-				// that could be used to replace the arrow, but I don't know which glyph to use...
 				report_error(
 					message.c_str(), vbegin + std::distance(value.begin(), value_state.where));
 
@@ -559,8 +556,9 @@ auto const header_action = [](auto& ctx) {
 	auto& globals = bp::_globals(ctx);
 	tl_header_tuple& header = bp::_attr(ctx);
 
+	// would it make any difference if I stored this inside of bp::_globals?
+	// I feel like it would make things worse.
 	report_wrapper wrap(ctx);
-	globals.tl_parser_ctx = &wrap;
 
 	tl_header entry;
 	entry.long_name = std::get<(int)tl_header_get::long_name>(header);
@@ -569,28 +567,25 @@ auto const header_action = [](auto& ctx) {
 	entry.date = std::get<(int)tl_header_get::date>(header);
 	entry.git_hash = std::get<(int)tl_header_get::git_hash>(header);
 
-	switch(globals.on_header(entry))
+	switch(globals.on_header(wrap, entry))
 	{
 	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
 	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
-	globals.tl_parser_ctx = nullptr;
 };
 auto const key_action = [](auto& ctx) {
 	auto& globals = bp::_globals(ctx);
 	auto& info = bp::_attr(ctx);
 
 	report_wrapper wrap(ctx);
-	globals.tl_parser_ctx = &wrap;
 
-	switch(globals.on_translation(std::get<0>(info), std::get<1>(info)))
+	switch(globals.on_translation(wrap, std::get<0>(info), std::get<1>(info)))
 	{
 	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
 	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
-	globals.tl_parser_ctx = nullptr;
 };
 #ifdef TL_ENABLE_FORMAT
 auto const format_action = [](auto& ctx) {
@@ -598,15 +593,13 @@ auto const format_action = [](auto& ctx) {
 	auto& info = bp::_attr(ctx);
 
 	report_wrapper wrap(ctx);
-	globals.tl_parser_ctx = &wrap;
 
-	switch(globals.on_format(std::get<0>(info), std::get<1>(info)))
+	switch(globals.on_format(wrap, std::get<0>(info), std::get<1>(info)))
 	{
 	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
 	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
-	globals.tl_parser_ctx = nullptr;
 };
 #endif
 
@@ -615,7 +608,6 @@ auto const info_action = [](auto& ctx) {
 	tl_info_tuple& info = bp::_attr(ctx);
 
 	report_wrapper wrap(ctx);
-	globals.tl_parser_ctx = &wrap;
 
 	tl_info entry;
 	entry.function = std::get<(int)tl_info_get::function>(info);
@@ -623,47 +615,42 @@ auto const info_action = [](auto& ctx) {
 	entry.line = std::get<(int)tl_info_get::line>(info);
 	entry.column = std::get<(int)tl_info_get::column>(info);
 
-	switch(globals.on_info(entry))
+	switch(globals.on_info(wrap, entry))
 	{
 	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
 	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
-	globals.tl_parser_ctx = nullptr;
 };
 auto const no_match_action = [](auto& ctx) {
 	auto& globals = bp::_globals(ctx);
 	tl_no_match_tuple& no_match_info = bp::_attr(ctx);
 
 	report_wrapper wrap(ctx);
-	globals.tl_parser_ctx = &wrap;
 
 	tl_no_match entry;
 	entry.date = std::get<(int)tl_no_match_get::date>(no_match_info);
 	entry.git_hash = std::get<(int)tl_no_match_get::git_hash>(no_match_info);
 
-	switch(globals.on_no_match(entry))
+	switch(globals.on_no_match(wrap, entry))
 	{
 	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
 	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
-	globals.tl_parser_ctx = nullptr;
 };
 
 auto const comment_action = [](auto& ctx) {
 	auto& globals = bp::_globals(ctx);
 
 	report_wrapper wrap(ctx);
-	globals.tl_parser_ctx = &wrap;
 
-	switch(globals.on_comment(bp::_attr(ctx)))
+	switch(globals.on_comment(wrap, bp::_attr(ctx)))
 	{
 	case TL_RESULT::SUCCESS:
 	case TL_RESULT::WARNING: break;
 	case TL_RESULT::FAILURE: bp::_pass(ctx) = false; break;
 	}
-	globals.tl_parser_ctx = nullptr;
 };
 
 // TODO: make naming more consistent...

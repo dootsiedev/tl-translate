@@ -88,14 +88,14 @@ typedef std::variant<tl_comment, tl_info, tl_no_match> translation_variant;
 struct entry_ast
 {
 	std::string key;
-	std::optional<std::string> value;
+	std::optional<annotated_string> value;
 	std::vector<translation_variant> extra;
 	bool format_text = false;
 	entry_ast() = default;
 	// C++17 emplace back pain
 	entry_ast(
 		std::string&& key_,
-		std::optional<std::string>&& value_,
+		std::optional<annotated_string>&& value_,
 		std::vector<translation_variant>&& extra_,
 		bool format = false)
 	: key(std::move(key_))
@@ -122,14 +122,14 @@ struct load_ast_handler : public tl_parse_observer
 		serr(msg);
 	}
 
-	TL_RESULT on_header(tl_header& header_) override
+	TL_RESULT on_header(tl_parse_state& tl_state, tl_header& header_) override
 	{
 		header = std::move(header_);
 		return TL_RESULT::SUCCESS;
 	}
 
 
-	TL_RESULT on_insert(std::string& key, std::optional<std::string>& value, bool format)
+	TL_RESULT on_insert(tl_parse_state& tl_state, std::string& key, std::optional<annotated_string>& value, bool format)
 	{
 		// NOTE: is the key captured as a reference or a copy if I [key]?
 		auto find_it = std::find_if(ast_root.begin(), ast_root.end(), [&key](const entry_ast& ast) -> bool {
@@ -140,13 +140,13 @@ struct load_ast_handler : public tl_parse_observer
 		{
 			if(find_it->format_text != format)
 			{
-				tl_parser_ctx->report_error("duplicate mismatching TL_TEXT with TL_FORMAT!");
+				tl_state.report_error("duplicate mismatching TL_TEXT with TL_FORMAT!");
 				return TL_RESULT::FAILURE;
 			}
 			if(!is_patch)
 			{
 				// I don't return TL_RESULT::WARNING because it does nothing.
-				tl_parser_ctx->report_warning("merging duplicate (this shouldn't happen)");
+				tl_state.report_warning("merging duplicate (this shouldn't happen)");
 			}
 			for(auto& extra : extra_stack)
 			{
@@ -161,32 +161,28 @@ struct load_ast_handler : public tl_parse_observer
 		return TL_RESULT::SUCCESS;
 	}
 
-	TL_RESULT on_translation(std::string& key, std::optional<annotated_string>& value) override
+	TL_RESULT on_translation(tl_parse_state& tl_state, std::string& key, std::optional<annotated_string>& value) override
 	{
-		std::optional<std::string> val;
-		if(value.has_value()){val = std::make_optional<std::string>(value->data);}
-		return on_insert(key, val, false);
+		return on_insert(tl_state, key, value, false);
 	}
 #ifdef TL_ENABLE_FORMAT
-	TL_RESULT on_format(std::string& key, std::optional<annotated_string>& value) override
+	TL_RESULT on_format(tl_parse_state& tl_state, std::string& key, std::optional<annotated_string>& value) override
 	{
-		std::optional<std::string> val;
-		if(value.has_value()){val = std::make_optional<std::string>(value->data);}
-		return on_insert(key, val, true);
+		return on_insert(tl_state, key, value, true);
 	}
 #endif
-	TL_RESULT on_comment(std::string& comment) override
+	TL_RESULT on_comment(tl_parse_state& tl_state, std::string& comment) override
 	{
 		extra_stack.emplace_back(tl_comment{std::move(comment)});
 		return TL_RESULT::SUCCESS;
 	}
 
-	TL_RESULT on_info(tl_info& info) override
+	TL_RESULT on_info(tl_parse_state& tl_state, tl_info& info) override
 	{
 		extra_stack.emplace_back(std::move(info));
 		return TL_RESULT::SUCCESS;
 	}
-	TL_RESULT on_no_match(tl_no_match& no_match) override
+	TL_RESULT on_no_match(tl_parse_state& tl_state, tl_no_match& no_match) override
 	{
 		extra_stack.emplace_back(std::move(no_match));
 		return TL_RESULT::SUCCESS;
@@ -460,9 +456,9 @@ static bool dump_formatted_ast(FILE* file, std::vector<entry_ast>& ast_root, tl_
 		if(entry.value.has_value())
 		{
 			// it should be +2, but I add +1 for a single newline escape.
-			value_buffer.reserve(entry.value->size() + 3);
+			value_buffer.reserve(entry.value->data.size() + 3);
 			value_buffer += '\"';
-			if(!escape_string(value_buffer, *entry.value))
+			if(!escape_string(value_buffer, entry.value->data))
 			{
 				return false;
 			}

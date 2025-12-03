@@ -108,11 +108,9 @@ public:
 	virtual void report_error(const char* msg, tl_buffer_type::iterator eiter) = 0;
 	virtual void report_warning(const char* msg, tl_buffer_type::iterator eiter) = 0;
 
-	// gets the current iterator location
-	// this would be useful if I actually made each variable a callback.
-	// But... I like having objects...
-	// and this is useless if I annotated every variable (but this would also be very cursed)
-	// TODO: Remove this, but I use it for check_printf_specifiers non-annotated key... (wrong)
+	// gets the current location for the line
+	// you can't get the location of individual combined values, you need annotations for that.
+	// but annotating every variable is cursed. Don't do it.
 	virtual tl_buffer_type::iterator get_iterator() = 0;
 	virtual ~tl_parse_state() = default;
 
@@ -138,36 +136,34 @@ private:
 class tl_parse_observer
 {
 public:
-	// set while parsing.
-	// TODO: I should make this a callback parameter,
-	//  since this will not work if you try to use it outside the callback
-	tl_parse_state* tl_parser_ctx = nullptr;
-
 	// send to stdout or whatever
 	virtual void on_warning(const char* msg) = 0;
 	virtual void on_error(const char* msg) = 0;
 
-	virtual TL_RESULT on_header(tl_header& header) = 0;
-	virtual TL_RESULT on_translation(std::string& key, std::optional<annotated_string>& value) = 0;
+	virtual TL_RESULT on_header(tl_parse_state& tl_state, tl_header& header) = 0;
+	virtual TL_RESULT on_translation(tl_parse_state& tl_state, std::string& key, std::optional<annotated_string>& value) = 0;
 #ifdef TL_ENABLE_FORMAT
 	// value_offset is the offset from tl_parse_state::get_iterator(), for printing diagnostics.
 	// I SHOULD have it for the key as well, but I don't.
-	virtual TL_RESULT on_format(std::string& key, std::optional<annotated_string>& value) = 0;
+	virtual TL_RESULT on_format(tl_parse_state& tl_state, std::string& key, std::optional<annotated_string>& value) = 0;
 #endif
 
-	virtual TL_RESULT on_comment(std::string& comment)
+	virtual TL_RESULT on_comment(tl_parse_state& tl_state, std::string& comment)
 	{
+		(void)tl_state;
 		(void)comment;
 		return TL_RESULT::SUCCESS;
 	}
 
-	virtual TL_RESULT on_info(tl_info& info)
+	virtual TL_RESULT on_info(tl_parse_state& tl_state, tl_info& info)
 	{
+		(void)tl_state;
 		(void)info;
 		return TL_RESULT::SUCCESS;
 	}
-	virtual TL_RESULT on_no_match(tl_no_match& no_match)
+	virtual TL_RESULT on_no_match(tl_parse_state& tl_state, tl_no_match& no_match)
 	{
+		(void)tl_state;
 		(void)no_match;
 		return TL_RESULT::SUCCESS;
 	}

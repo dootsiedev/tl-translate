@@ -11,11 +11,12 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
         "USE_CPP23": false,
         "USE_CPP_STACKTRACE": false,
-        "USE_WIN32_DEBUG_INFO": true,
+        "USE_WIN32_DEBUG_INFO": false,
         "TL_COMPILE_TIME_TRANSLATION": false,
         "TL_COMPILE_TIME_ASSERTS": true,
         "BUILD_TESTS": true,
         "ENABLE_AI": true,
+        "WIN_UNICODE_HACK": true,
         "AI_PYTHON_DIR": "${sourceDir}/../python_venv",
         "AI_CACHE_DIR": "${sourceDir}/../hf_cache"
       }

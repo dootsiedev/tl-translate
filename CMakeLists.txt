@@ -579,6 +579,18 @@ if(USE_PCH)
     target_precompile_headers(MY_OPTIONS_FLAGS INTERFACE "code/core/global_pch.h")
 endif()
 
+if(WIN32)
+    # it's slow because everything is still utf8, but at the last step I convert it to wchar_t
+    # but slogf is much worse, it is vasprintf -> convert to wchar_t -> fwrite(stdout, wchar)
+    # this has nothing to do with the utf8 manifest option,
+    # for that to work you need to set the experimental utf8 localization in system settings, or set chcp 65001
+    # This will probably be replaced with SetConsoleOutputCP(CP_UTF8) which is identical to chcp 65001,
+    # but it triggers Address sanitizer when I use conemu... (I might need to update it).
+    option(WIN_UNICODE_HACK "this will output utf8 to the console, but it's very SLOW!!!" OFF)
+    if(WIN_UNICODE_HACK)
+        target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE WIN_UNICODE_HACK)
+    endif()
+endif()
 
 
 #enable this just in case (clang on linux doesn't default to PIE)

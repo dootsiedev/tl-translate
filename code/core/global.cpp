@@ -250,7 +250,13 @@ static MY_NOINLINE void serr_safe_stacktrace(int skip)
 		msg += '\n';
 
 		internal_get_serr_buffer()->append(msg);
+#ifdef WIN_UNICODE_HACK
+		// requires _setmode(_fileno(stdout), _O_U8TEXT);
+		std::wstring wtext = WIN_UTF8ToWide(msg.c_str(), msg.size());
+		fwrite(wtext.c_str(), sizeof(wchar_t), wtext.size(), stdout);
+#else
 		fwrite(msg.c_str(), 1, msg.size(), stdout);
+#endif
 #ifndef DISABLE_CONSOLE
 		{
 #ifndef __EMSCRIPTEN__
@@ -272,7 +278,12 @@ void slog_raw(const char* msg, size_t len)
 	}
 	// on win32, if did a /subsystem:windows, I would probably
 	// replace stdout with OutputDebugString on the debug build.
+#ifdef WIN_UNICODE_HACK
+	std::wstring wtext = WIN_UTF8ToWide(msg, len);
+	fwrite(wtext.c_str(), sizeof(wchar_t), wtext.size(), stdout);
+#else
 	fwrite(msg, 1, len, stdout);
+#endif
 
 #ifndef DISABLE_CONSOLE
 	{
@@ -297,7 +308,12 @@ MY_NOINLINE void serr_raw(const char* msg, size_t len)
 	serr_safe_stacktrace(1);
 
 	internal_get_serr_buffer()->append(msg, msg + len);
+#ifdef WIN_UNICODE_HACK
+	std::wstring wtext = WIN_UTF8ToWide(msg, len);
+	fwrite(wtext.c_str(), sizeof(wchar_t), wtext.size(), stdout);
+#else
 	fwrite(msg, 1, len, stdout);
+#endif
 
 #ifndef DISABLE_CONSOLE
 	{
@@ -333,7 +349,18 @@ __attribute__((format(printf, 1, 2))) void slogf(MY_MSVC_PRINTF const char* fmt,
 	va_copy(temp_args, args);
 #endif
 
-#ifdef _WIN32
+#ifdef WIN_UNICODE_HACK
+	// double redundant allocation...
+	// in C++26 std::inplace_vector could speed this up a decent amount for smallish strings.
+	// sadly, the big strings are exactly the type of strings that I need to optimize....
+	std::string buffer;
+	str_vasprintf(buffer, fmt, args);
+	std::wstring wtext = WIN_UTF8ToWide(buffer.c_str(), buffer.size());
+	fwrite(wtext.c_str(), sizeof(wchar_t), wtext.size(), stdout);
+	// this will overflow some memory with asan...
+	// std::wstring wtext = WIN_UTF8ToWide(fmt, strlen(fmt));
+	// vfwprintf_s(stdout, wtext.c_str(), args);
+#elif defined(_WIN32)
 	// win32 has a compatible C standard library, but annex k prevents exploits or something.
 	vfprintf_s(stdout, fmt, args);
 #else
@@ -366,10 +393,25 @@ MY_NOINLINE __attribute__((format(printf, 1, 2))) void serrf(MY_MSVC_PRINTF cons
 
 	serr_safe_stacktrace(1);
 
+	size_t serr_offset = internal_get_serr_buffer()->size();
+#ifdef WIN_UNICODE_HACK
+	// it would be a little better if I used the serr buffer, then passed a string_view into utf8
+	std::string buffer;
+
 	va_list args;
-	va_list temp_args;
 	va_start(args, fmt);
-	// I think asprintf + reuse would be faster.
+	str_vasprintf(buffer, fmt, args);
+	va_end(args);
+
+	std::wstring wtext = WIN_UTF8ToWide(buffer.c_str(), buffer.size());
+	fwrite(wtext.c_str(), sizeof(wchar_t), wtext.size(), stdout);
+
+	*internal_get_serr_buffer() += buffer;
+#else
+	va_list args;
+	va_start(args, fmt);
+
+	va_list temp_args;
 	va_copy(temp_args, args);
 
 #ifdef _WIN32
@@ -380,10 +422,10 @@ MY_NOINLINE __attribute__((format(printf, 1, 2))) void serrf(MY_MSVC_PRINTF cons
 #endif
 	va_end(args);
 
-	size_t serr_offset = internal_get_serr_buffer()->size();
 	va_start(temp_args, fmt);
 	str_vasprintf(*internal_get_serr_buffer(), fmt, temp_args);
 	va_end(temp_args);
+#endif
 #ifndef DISABLE_CONSOLE
 	{
 #ifndef __EMSCRIPTEN__

@@ -102,9 +102,9 @@ const char* translate_gettext(const char* text)
 #ifdef TL_ENABLE_FORMAT
 const char* translate_get_format(const char* text)
 {
-	// TODO: copy-paste, the functions are identical
-	tl_index index = get_format_index(text);
+	// TODO: copy-paste, translate_gettext is identical
 #ifdef TL_COMPILE_TIME_TRANSLATION
+	tl_index index = get_format_index(text);
 	switch(get_translation_context().current_lang)
 	{
 	case TL_LANG::English: return text;
@@ -125,6 +125,8 @@ const char* translate_get_format(const char* text)
 	ASSERT_M("translation not found", text);
 	return text;
 #else
+	// TODO: get_text(text) will just call get_format_index,
+	//  there is no reason to have 2 separate functions with and without the index...
 	return get_translation_context().format_table.get_text(text);
 #endif
 }
