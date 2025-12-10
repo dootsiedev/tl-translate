@@ -46,6 +46,16 @@ __attribute__((format(printf, 1, 2))) static void infof(MY_MSVC_PRINTF const cha
 #define infof(fmt, ...)
 #endif
 
+
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#if defined __WIN32__ || defined _WIN32 || defined _Windows
+#if !defined S_ISDIR
+#define S_ISDIR(m) (((m) & _S_IFDIR) == _S_IFDIR)
+#endif
+#endif
+
 static bool g_use_werror = false;
 static bool g_werror_has_error = false;
 // I could add a werrf, but this is ONLY for the parser.
@@ -117,6 +127,193 @@ struct entry_ast
 	}
 };
 
+// TODO: replace with hungarian method
+//  https://github.com/jamespayor/weighted-bipartite-perfect-matching/blob/master/test.cpp
+
+struct WeightedBipartiteEdge {
+	int left;
+	int right;
+	int cost;
+
+	WeightedBipartiteEdge() : left(), right(), cost() {}
+	WeightedBipartiteEdge(int left, int right, int cost) : left(left), right(right), cost(cost) {}
+};
+static std::pair<int, std::vector<int> > bruteForceInternal(const int n, const std::vector<WeightedBipartiteEdge> edges, std::vector<bool>& leftMatched, std::vector<bool>& rightMatched, const int edgeUpTo = 0, const int matchCount = 0) {
+	if (matchCount == n) {
+		return std::make_pair(0, std::vector<int>());
+	}
+
+	int bestCost = 1 << 20;
+	std::vector<int> bestEdges;
+	for (int edgeIndex = edgeUpTo; edgeIndex < edges.size(); ++edgeIndex) {
+		const WeightedBipartiteEdge& edge = edges[edgeIndex];
+		if (!leftMatched[edge.left] && !rightMatched[edge.right]) {
+			leftMatched[edge.left] = true;
+			rightMatched[edge.right] = true;
+			std::pair<int, std::vector<int> > remainder = bruteForceInternal(n, edges, leftMatched, rightMatched, edgeIndex + 1, matchCount + 1);
+			leftMatched[edge.left] = false;
+			rightMatched[edge.right] = false;
+
+			if (remainder.first + edge.cost < bestCost) {
+				bestCost = remainder.first + edge.cost;
+				bestEdges = remainder.second;
+				bestEdges.push_back(edgeIndex);
+			}
+		}
+	}
+
+	return std::make_pair(bestCost, bestEdges);
+}
+
+// fuzzy matcher (this is for matching function names, not whole sentances! but I still want to try)
+// https://github.com/philj56/fuzzy-match/tree/main
+namespace fuzzy_match_stuff{
+
+
+/*
+ * Calculate the score for a single matching letter.
+ * The scoring system is taken from fts_fuzzy_match v0.2.0 by Forrest Smith,
+ * which is licensed to the public domain.
+ *
+ * The factors affecting score are:
+ *   - Bonuses:
+ *     - If there are multiple adjacent matches.
+ *     - If a match occurs after a separator character.
+ *     - If a match is uppercase, and the previous character is lowercase.
+ *
+ *   - Penalties:
+ *     - If there are letters before the first match.
+ *     - If there are superfluous characters in str (already accounted for).
+ */
+int32_t compute_score(int32_t jump, bool first_char, const char * match)
+{
+	const int adjacency_bonus = 15;
+	const int separator_bonus = 30;
+	const int camel_bonus = 30;
+	const int first_letter_bonus = 15;
+
+	const int leading_letter_penalty = -5;
+	const int max_leading_letter_penalty = -15;
+
+	int32_t score = 0;
+
+	/* Apply bonuses. */
+	if (!first_char && jump == 0) {
+		score += adjacency_bonus;
+	}
+	if (!first_char || jump > 0) {
+		if (isupper((unsigned char)*match)
+		   && islower((unsigned char)*(match - 1))) {
+			score += camel_bonus;
+		}
+		if (isalnum((unsigned char)*match)
+		   && !isalnum((unsigned char)*(match - 1))) {
+			score += separator_bonus;
+		}
+	}
+	if (first_char && jump == 0) {
+		/* Match at start of string gets separator bonus. */
+		score += first_letter_bonus;
+	}
+
+	/* Apply penalties. */
+	if (first_char) {
+		score += std::max(leading_letter_penalty * jump,
+					 max_leading_letter_penalty);
+	}
+
+	return score;
+}
+/*
+ * Recursively match the whole of pattern against str.
+ * The score parameter is the score of the previously matched character.
+ *
+ * This reaches a maximum recursion depth of strlen(pattern) + 1. However, the
+ * stack usage is small (the maximum I've seen on x86_64 is 144 bytes with
+ * gcc -O3), so this shouldn't matter unless pattern contains thousands of
+ * characters.
+ */
+
+int musl_strncasecmp(const char *_l, const char *_r, size_t n)
+{
+	const unsigned char *l=(unsigned char *)_l, *r=(unsigned char *)_r;
+	if (!n--) return 0;
+	for (; *l && *r && n && (*l == *r || tolower(*l) == tolower(*r)); l++, r++, n--);
+	return tolower(*l) - tolower(*r);
+}
+char *musl_strcasestr(const char *h, const char *n)
+{
+	size_t l = strlen(n);
+	for (; *h; h++) if (!musl_strncasecmp(h, n, l)) return (char *)h;
+	return 0;
+}
+
+int32_t fuzzy_match_recurse(
+	const char * pattern,
+	const char * str,
+	int32_t score,
+	bool first_char)
+{
+	if (*pattern == '\0') {
+		/* We've matched the full pattern. */
+		return score;
+	}
+
+	const char *match = str;
+	const char search[2] = { *pattern, '\0' };
+
+	int32_t best_score = INT32_MIN;
+
+	/*
+	 * Find all occurrences of the next pattern character in str, and
+	 * recurse on them.
+	 */
+	while ((match = musl_strcasestr(match, search)) != NULL) {
+		int32_t subscore = fuzzy_match_recurse(
+			pattern + 1,
+			match + 1,
+			compute_score(match - str, first_char, match),
+			false);
+		best_score = std::max(best_score, subscore);
+		match++;
+	}
+
+	if (best_score == INT32_MIN) {
+		/* We couldn't match the rest of the pattern. */
+		return INT32_MIN;
+	} else {
+		return score + best_score;
+	}
+}
+
+} // namespace fuzzy_match_stuff
+/*
+ * Returns score if each character in pattern is found sequentially within str.
+ * Returns INT32_MIN otherwise.
+ */
+int32_t fuzzy_match(const char * pattern, const char * str)
+{
+	const int unmatched_letter_penalty = -1;
+	const size_t slen = strlen(str);
+	const size_t plen = strlen(pattern);
+	int32_t score = 100;
+
+	if (*pattern == '\0') {
+		return score;
+	}
+	if (slen < plen) {
+		return INT32_MIN;
+	}
+
+	/* We can already penalise any unused letters. */
+	score += unmatched_letter_penalty * (int32_t)(slen - plen);
+
+	/* Perform the match. */
+	score = fuzzy_match_stuff::fuzzy_match_recurse(pattern, str, score, true);
+
+	return score;
+}
+
 struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 {
 	// I need to hold onto the file because I check for format specifier errors
@@ -129,7 +326,6 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 	// I don't actually use the ast... until you merge, but I could have just passed it...
 	load_ast_handler* patch_file = nullptr;
 
-	// TODO: rename this to ast_iter
 	typedef decltype(ast_root)::iterator ast_iter;
 	typedef decltype(ast_root)::const_iterator c_ast_iter;
 
@@ -397,6 +593,7 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 		{
 			info(it->key.c_str());
 		}*/
+		auto patch_ast_end = patch_file->ast_root.cend();
 		bool success = true;
 		auto rem_it =
 			std::remove_if(missing_old_text.begin(), missing_old_text.end(), [&](auto it) {
@@ -409,16 +606,19 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 					switch(auto_merge(jt, it))
 					{
 					case merge_result::MATCH_FOUND:
-						infof("found merge with: `%s` == `%s`\n", jt->key.c_str(), it->key.c_str());
+						infof(
+							"found merge with: `%s` == `%s`\n",
+							escape_string(jt->key).c_str(),
+							escape_string(it->key).c_str());
 						it->key = jt->key;
-						it->extra.clear();
+						//it->extra.clear();
 						it->extra = jt->extra;
 						// mark for deletion.
-						jt = patch_file->ast_root.end();
+						jt = patch_ast_end;
 						return true;
 					case merge_result::MATCH_NOT_FOUND:
 						break;
-						// TODO: I think this will only be fore werror
+						// TODO: I think this will only be for werror, and I might use exceptions...
 					case merge_result::MATCH_FAILURE: success = false; return false;
 					}
 				}
@@ -430,10 +630,20 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 		}
 		missing_old_text.erase(rem_it, missing_old_text.end());
 
-		// delete the ones that matched in the other array.
+		// delete the other pairs that were invalidated.
 		missing_patches.erase(
-			std::remove(missing_patches.begin(), missing_patches.end(), patch_file->ast_root.end()),
+			std::remove(missing_patches.begin(), missing_patches.end(), patch_ast_end),
 			missing_patches.end());
+
+
+		// TODO: do the AI merging here.
+		//  if I use the flag embedding, it will give me a matrix of similarities.
+		//  I could just have a threshold and if it passes, pick the best scoring value
+		//  but my tiny brain is too small to know if this is a harder problem than I expect,
+		//  or if I am over thinking it.
+		//  It's possible that I must use the hungarian method
+		//  (But, hungarian method uses unbounded numbers, the similarity values are normalized)
+		//  also there is the brute force method which seems to be O(n^4)
 
 		// add TL_NO_MATCH
 		for(auto it : missing_old_text)
@@ -540,7 +750,6 @@ struct format_ast_visitor
 	{
 		ASSERT(file != nullptr);
 
-		// TODO: I don't check for escaped string, but I should make that a parser rule.
 		checked_fprintf(
 			file,
 			"TL_NO_MATCH(\"%s\", \"%s\")\n",
@@ -555,7 +764,6 @@ static bool dump_formatted_ast(FILE* file, std::vector<entry_ast>& ast_root, tl_
 {
 	checked_fputs("// this is a file generated by merge-strings\n\n", file);
 
-	// TODO: I don't check for escaped strings, but I should make that a parser rule.
 	checked_fprintf(
 		file,
 		"TL_START(%s, %s, \"%s\", \"%s\", \"%s\")\n\n",
@@ -619,23 +827,6 @@ static bool dump_formatted_ast(FILE* file, std::vector<entry_ast>& ast_root, tl_
 	return true;
 }
 
-#include <sys/types.h>
-#include <sys/stat.h>
-
-#ifndef _WIN32
-// I could use _CRT_INTERNAL_NONSTDC_NAMES
-// but I forgot why I don't.
-#define _fileno fileno
-#define _fstat fstat
-#define _stat stat
-#endif
-
-// yep it's stupid, I use underscore for linux, but don't for S_ISDIR
-#if defined __WIN32__ || defined _WIN32 || defined _Windows
-#if !defined S_ISDIR
-#define S_ISDIR(m) (((m) & _S_IFDIR) == _S_IFDIR)
-#endif
-#endif
 
 static bool slurp_stdio(std::string& out, FILE* fp, const char* name)
 {
@@ -646,8 +837,8 @@ static bool slurp_stdio(std::string& out, FILE* fp, const char* name)
 		serrf("error indicator set: `%s`\n", name);
 		return false;
 	}
-	struct _stat info;
-	int ret = _fstat(_fileno(fp), &info);
+	struct stat info;
+	int ret = fstat(fileno(fp), &info);
 	if(ret != 0)
 	{
 		serrf("fstat error: `%s`, reason: %s (return: %d)\n", name, strerror(errno), ret);
@@ -678,92 +869,8 @@ static bool slurp_file(std::string& out, const char* path)
 	return success;
 }
 
-#if 0
-// this only finds duplicates inside of the patch.
-static bool merge_patch(std::vector<entry_ast>& ast_patch)
-{
-	bool success = true;
-#ifndef NDEBUG
-	// slow test to make sure this is actually a patch file.
-	for(auto& ast : ast_patch)
-	{
-		if(ast.key.value.has_value())
-		{
-			serrf("merge_patch: Patch files must not have values stored!: `%s`", ast.key.key.c_str());
-			success = false;
-		}
-	}
-#endif
-	// I looked on the internet for "remove duplicates from vector"
-	// and I found a dozen solutions, but none match this.
-	// I think it might be possible that just sorting this and doing std::unique is faster.
-	// but I don't want to actually sort anything
-	// (sorting would fix the problem of the translation file being "updated" in git
-	// if you change the order of files in cmake or within the code,
-	// but I kind of like unsorted translations... technically it's still ordered in a way
-	// BUT this won't happen for incremental patches, since it will only append to the end. )
-	auto rit = std::remove_if(
-		ast_patch.rbegin(), ast_patch.rend(), [&ast_patch, &success](entry_ast& cur_ast) -> bool {
-			// the pointer offset only works for std::vector
-			// I could have a custom std::remove_if that passes the iterator / index
-			auto index = (&cur_ast - ast_patch.data());
-			ASSERT(index < ast_patch.size());
-			auto it_end = std::next(ast_patch.begin(), index);
-			auto find_it =
-				std::find_if(ast_patch.begin(), it_end, [&cur_ast](entry_ast& ast) -> bool {
-					return ast.key.key == cur_ast.key.key;
-				});
-			if(find_it != it_end)
-			{
-				if(find_it->format_text != cur_ast.format_text)
-				{
-					// TODO: I could probably pretty print with extra data showing the file and line
-					serrf(
-						"merge_patch: mismatching TL_TEXT with TL_FORMAT! %s",
-						find_it->key.key.c_str());
-					success = false;
-					return false;
-				}
-				find_it->extra.insert(
-					find_it->extra.begin(), cur_ast.extra.begin(), cur_ast.extra.end());
-			}
-			return true;
-		});
-	// this could be avoided if I used a range
-	ast_patch.erase(ast_patch.begin(), ast_patch.begin() + std::distance(rit, ast_patch.rend()));
-
-	return success;
-}
-
-// modifies ast_out with the patch
-static bool merge_ast(std::vector<entry_ast>& ast_out, const std::vector<entry_ast>& ast_patch)
-{
-	ASSERT(ast_out.data() != ast_patch.data());
-	std::vector<unsigned int> missing_entry;
-	for(auto it = ast_out.begin(); it != ast_out.end(); ++it)
-	{
-		auto find_it = std::find_if(ast_patch.begin(), ast_patch.end(), [it](const entry_ast& ast) {
-			return ast.key == it->key;
-		});
-		if(find_it != ast_out.end())
-		{
-			// TODO: the PATCH will ADD INFO (inside itself), the MERGE will REPLACE (+warn on duplicates)!
-			//  I need a separate function for fixing the patch
-			it->extra.insert(it->extra.end(), find_it->extra.begin(), find_it->extra.end());
-		}
-		else{
-			missing_entry.push_back(std::distance(ast_out.begin(), it));
-		}
-	}
-	for(auto slot: missing_entry)
-	{
-		infof("missing: %s\n", ast_patch[slot].key.c_str());
-	}
-	return true;
-}
-#endif
-
-#define CXXOPTS_NO_EXCEPTIONS
+// it still uses exceptions, but now instead it will print an error then abort.
+//#define CXXOPTS_NO_EXCEPTIONS
 #include <cxxopts.hpp>
 
 static cxxopts::Options options("test", "A brief description");
@@ -819,8 +926,8 @@ static bool load_translation_ast()
 	{
 		lang_directory = res["lang-dir"].as<std::string>();
 		const char* dir_path = lang_directory->c_str();
-		struct _stat sb;
-		if(_stat(dir_path, &sb) == 0)
+		struct stat sb;
+		if(stat(dir_path, &sb) == 0)
 		{
 			if(!S_ISDIR(sb.st_mode))
 			{
@@ -840,8 +947,8 @@ static bool load_translation_ast()
 	{
 		stage_directory = res["stage_dir"].as<std::string>();
 		const char* dir_path = stage_directory->c_str();
-		struct _stat sb;
-		if(_stat(dir_path, &sb) == 0)
+		struct stat sb;
+		if(stat(dir_path, &sb) == 0)
 		{
 			if(!S_ISDIR(sb.st_mode))
 			{
@@ -945,7 +1052,7 @@ int main(int argc, char** argv)
 
 	if(res.count("tool") > 1)
 	{
-		werrf("--tool called more than once = %d\n", res.count("tool"));
+		werrf("--tool called more than once = %zu\n", res.count("tool"));
 	}
 
 	if(!load_translation_ast())

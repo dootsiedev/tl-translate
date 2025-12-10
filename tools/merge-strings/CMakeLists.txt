@@ -105,10 +105,13 @@ if(ENABLE_AI)
     # find FlagEmbedding
     # TODO: I don't use python, I think there are a lot of python package managers... Does this work with anaconda?
     #  I think I need to just ONLY check pip if I have AI_PYTHON_DIR?
-    execute_process(COMMAND ${Python3_EXECUTABLE} -m pip show FlagEmbedding
-            RESULT_VARIABLE pip_result
-            OUTPUT_VARIABLE pip_output
-            ERROR_VARIABLE pip_error)
+
+    if(NOT pip_result EQUAL 0)
+        execute_process(COMMAND ${Python3_EXECUTABLE} -m pip show FlagEmbedding
+                RESULT_VARIABLE pip_result
+                OUTPUT_VARIABLE pip_output
+                ERROR_VARIABLE pip_error)
+    endif()
 
     if(pip_result EQUAL 0)
         message(STATUS "FlagEmbedding was found! ${pip_output}")

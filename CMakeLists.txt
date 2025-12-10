@@ -30,6 +30,7 @@ option(PORTABLE "Helps bundle DLL's when you install, also sets rpath on linux" 
 #but with different command line syntax (and MSVC=FALSE and GNUC=TRUE).
 #so MY_CLANGCL means both MSVC and the GNUC.
 if("x${CMAKE_CXX_COMPILER_ID}" MATCHES "x.*Clang")
+    set(MY_CLANG TRUE)
     if("x${CMAKE_CXX_SIMULATE_ID}" STREQUAL "xMSVC")
         #called MY_ because I don't want it to clash with anything
         set(MY_CLANGCL TRUE)
@@ -78,14 +79,21 @@ endif()
 
 # no reason to turn of RTTI, but maybe it makes the binary smaller
 option(NO_RTTI "disable run time type information" OFF)
-# disable exceptions, should make things faster,
-# not sure if there is any reason to keep this off during debug, since this should be the default.
+# disable exceptions.
+# msvc can still catch exceptions, but everything on the stack will leak.
 option(NO_EXCEPTIONS "disable exception unwinding" OFF)
 
-#put all the flags here.
+# put all the flags here.
+# TODO: I don't put all the flags here.
+#  I want to clean up the flag groups, I think I should split it up into 3 parts.
+#  options / defines for my code, extensively-strict warnings (warnings + clang's ubsan=implicit-conversion),
+#  and common flags used for external libraries (such as by fetchContent or a subdirectory, should match vcpkg flags).
+#  (does INTERFACE/PUBLIC/PRIVATE help in this situation?)
 set(MY_COMPILER_FLAGS "")
 
 if (MSVC OR MY_CLANGCL)
+    # this is missing  for stat instead of _stat.
+    # it's ugly that I define _stat for linux, but... I kind of like the style...
 	set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE -D_SCL_SECURE_NO_WARNINGS -DNOMINMAX)
     if(USE_SIMPLE_HARDEN)
         set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -D_MSVC_STL_HARDENING)
@@ -99,6 +107,9 @@ if (MSVC)
     set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /wd4244) # C4244: 'conversion_type': conversion from 'type1' to 'type2', possible loss of data
     set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /wd4068) # C4068: unknown pragma
 
+    # treat as error
+    set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /we4473)# warning C4473: 'printf' : not enough arguments passed for format string
+
     #I never noticed anything with utf8 because I don't use unicode, but why not.
     set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /utf-8)
 
@@ -107,12 +118,20 @@ if (MSVC)
         #set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -fuse-ld=lld-link)
     endif()
 
-    # I turned this off for MY_CLANGCL because it's SLOW!
-    # But does clang-cl check anything different? or is it just using msvc...
+    # I turn this off for MY_CLANGCL because it's slower than msvc, because I think it's because analyzed by msvc.
+    # (but I don't use clang-cl.exe, I don't know if it even compiles, I typically just use clang++.exe)
 	option(NO_ANALYZE "disable msvc /analyze, required for slogf formatting warnings (but /analyze is slow)" ${MY_CLANGCL})
 	if(NOT NO_ANALYZE)
 		# will this enable SAL warnings for _Printf_format_string_
 		set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /analyze)
+        # treat _Printf_format_string_ as error... This is terrible...
+        set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /we6063) #warning C6063: Missing string argument to 'MyFormat' that corresponds to conversion specifier '1'.
+        set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /we6067) #warning C6067: _Param_(2) in call to 'MyFormat' must be the address of a string. Actual type: 'int'.
+        set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /we6066)
+        set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /we6065)
+        set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /we6064)
+        set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /we6303) # warning C6303: Format string mismatch.
+        set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} /we6302) # wchar_t %hs (does not apply to my code)
 	endif()
 
 
@@ -132,8 +151,6 @@ if (MSVC)
 
         # I want relwithdebinfo to be closer to release
         string( REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO}")
-        # much smaller binary.
-        set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /OPT:REF")
     endif()
 
     if(NO_RTTI)
@@ -178,15 +195,41 @@ else()
 
 
     if(NOT WIN32)
-        # libc++ uses _LIBCPP_HARDENING_MODE_FAST or _LIBCPP_HARDENING_MODE_EXTENSIVE
-        if(USE_SIMPLE_HARDEN)
-            # this makes vector[] into a range check and probably more
-            set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -D_GLIBCXX_ASSERTIONS)
-        elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
-            # this makes the C++ library similar to msvc's /MDd with checked iterators I think?
-            set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -D_GLIBCXX_DEBUG)
+        include(CheckCXXSymbolExists)
+
+        if(cxx_std_20 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+            set(header version)
+        else()
+            set(header ciso646)
         endif()
-    else()
+
+        # I believe I require to build libc++ if I want checked iterators, and it does not support invalidation checks.
+        check_cxx_symbol_exists(_LIBCPP_VERSION ${header} LIBCPP)
+        if(LIBCPP)
+            if(USE_SIMPLE_HARDEN)
+                # this makes vector[] into a range check and probably more
+                set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST)
+            elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+                # this makes the C++ library similar to msvc's /MDd with checked iterators I think?
+                set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE)
+            endif()
+        endif()
+
+        check_cxx_symbol_exists(__GLIBCXX__ ${header} GLIBCXX)
+        if(GLIBCXX)
+            if(USE_SIMPLE_HARDEN)
+                # this makes vector[] into a range check and probably more
+                set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -D_GLIBCXX_ASSERTIONS)
+            elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+                # this makes the C++ library similar to msvc's /MDd with checked iterators I think?
+                set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -D_GLIBCXX_DEBUG)
+            endif()
+        endif()
+
+    endif()
+
+    # this doesn't work. you need mingw, and it works without adding this
+    if(0)#WIN32)
         # clang diagnostic colors with ninja?
         ADD_CHECK_CXX_COMPILER_FLAG(MY_COMPILER_FLAGS CXX_ANSI_ESCAPE_CODES -fansi-escape-codes)
     endif()
@@ -232,6 +275,8 @@ else()
 
     ADD_CHECK_CXX_COMPILER_FLAG(MY_COMPILER_FLAGS CXX_WARN_ENUM_CONVERSION -Wenum-conversion)
 
+    # a cope since it's pretty easy to neglect warnings that lead to crashes.
+    ADD_CHECK_CXX_COMPILER_FLAG(MY_COMPILER_FLAGS CXX_WERROR_FORMAT -Werror=format)
 
     set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -Wall -Wextra -Wpedantic)
     set(MY_COMPILER_FLAGS ${MY_COMPILER_FLAGS} -Wunused -Wundef -Wmissing-declarations -Wvla)
@@ -248,7 +293,7 @@ endif()
 # create ALL_SANITIZERS because you can reuse the settings on potential built-in libraries
 #
 
-add_library(ALL_SANITIZERS INTERFACE)
+add_library(ALL_SANITIZERS INTERFACE EXCLUDE_FROM_ALL)
 
 option(USE_ASAN "Use address sanitizer" OFF)
 if(USE_ASAN)
@@ -286,51 +331,63 @@ if(USE_ASAN)
 endif()
 
 
-# don't forget to use ubsan_options=print_stacktrace=1, and make sure llvm_symbolizer is reachable.
-# TODO: maybe minimal ubsan runtime might be interesting as a release fortification?
+# don't forget to use ubsan_options=print_stacktrace=1, and make sure llvm_symbolizer is in PATH.
 option(USE_UBSAN "Use undefined behavior sanitizer" OFF)
 if(USE_UBSAN)
-
     if(MSVC AND NOT MY_CLANGCL)
-		message(WARNING "ubsan not supported")
+        message(WARNING "ubsan not supported")
     endif()
 
-	# I don't know why but asan + ubsan works fine with non static vcrt (this is probably wrong)
-	if(MY_CLANGCL AND CMAKE_MSVC_RUNTIME_LIBRARY STREQUAL "MultiThreadedDLL")
+    # I don't know why but asan + ubsan works fine with non static vcrt (this is probably wrong)
+    if(MY_CLANGCL AND CMAKE_MSVC_RUNTIME_LIBRARY STREQUAL "MultiThreadedDLL")
         message(WARNING "USE_UBSAN needs CMAKE_MSVC_RUNTIME_LIBRARY to equal MultiThreaded because ubsan only works with the static runtime ATM")
-	endif()
+    endif()
 
-	target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize=undefined)
-	#make the application stop
-	#target_compile_options(ALL_SANITIZERS INTERFACE -fno-sanitize-recover=all)
-	target_link_options(ALL_SANITIZERS INTERFACE -fsanitize=undefined)
-
-	#these are clang specific, and these flags cause many false positives (especially in header-only libraries...)
-	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-		target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize=unsigned-integer-overflow -fsanitize=nullability -fsanitize=implicit-conversion -fsanitize=local-bounds)
-	endif()
+    target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize=undefined)
+    target_link_options(ALL_SANITIZERS INTERFACE -fsanitize=undefined)
 
     option(USE_UBSAN_TRAP "this makes the program stop, and raise the debugger" OFF)
     # (faster?) hardening: -fsanitize-minimal-runtime -fno-sanitize-merge
-	if(USE_UBSAN_TRAP)
-		if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-			target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-trap=undefined)
-			target_link_options(ALL_SANITIZERS INTERFACE -fsanitize-trap=undefined)
-		else()
-			#gcc doesn't support the same flags
-			target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-undefined-trap-on-error)
-			target_link_options(ALL_SANITIZERS INTERFACE -fsanitize-undefined-trap-on-error)
-		endif()
-	endif()
-	#else()
-	#    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-	#        target_compile_options(ALL_SANITIZERS INTERFACE -fno-sanitize-trap=undefined)
-	#        target_link_options(ALL_SANITIZERS INTERFACE -fno-sanitize-trap=undefined)
-	#    else()
-	#        #gcc doesn't support the same flags
-	#        target_compile_options(ALL_SANITIZERS INTERFACE -fno-sanitize-undefined-trap-on-error)
-	#        target_link_options(ALL_SANITIZERS INTERFACE -fno-sanitize-undefined-trap-on-error)
-	#    endif()
+    if(USE_UBSAN_TRAP)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-trap=undefined)
+            target_link_options(ALL_SANITIZERS INTERFACE -fsanitize-trap=undefined)
+        else()
+            #gcc doesn't support the same flags
+            target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-undefined-trap-on-error)
+            target_link_options(ALL_SANITIZERS INTERFACE -fsanitize-undefined-trap-on-error)
+        endif()
+    elseif(USE_SIMPLE_HARDEN)
+        # makes the application stop with a message.
+        # BUT while caught in the debugger, it will not show the message...
+        # I could probably allow the annoying clang checks to recover...
+        target_compile_options(ALL_SANITIZERS INTERFACE -fno-sanitize-recover=all)
+        # this helps with optimized builds?
+        target_compile_options(ALL_SANITIZERS INTERFACE -fno-sanitize-merge)
+
+        # fsanitize-minimal-runtime doesn't work with asan
+        # And I believe I must add all the ubsan functions... which is terrible... (UNLESS I am using this wrong?)
+        # I probably need this if I wanted to work in wasm-wasi.
+        # AND if I wanted to print a stacktrace on other people's PC (llvm-symbolizer is 80mb).
+        # someone did it here I think?
+        # https://cvsweb.netbsd.org/bsdweb.cgi/src/common/lib/libc/misc/ubsan.c?rev=1.12
+        #target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-minimal-runtime -fno-sanitize-merge)
+    else()
+        # these are clang specific, and these flags cause many false positives (especially implicit-conversion)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize=unsigned-integer-overflow -fsanitize=nullability -fsanitize=implicit-conversion -fsanitize=local-bounds)
+        endif()
+    endif()
+    #else()
+    #    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    #        target_compile_options(ALL_SANITIZERS INTERFACE -fno-sanitize-trap=undefined)
+    #        target_link_options(ALL_SANITIZERS INTERFACE -fno-sanitize-trap=undefined)
+    #    else()
+    #        #gcc doesn't support the same flags
+    #        target_compile_options(ALL_SANITIZERS INTERFACE -fno-sanitize-undefined-trap-on-error)
+    #        target_link_options(ALL_SANITIZERS INTERFACE -fno-sanitize-undefined-trap-on-error)
+    #    endif()
+
 endif ()
 
 
@@ -404,20 +461,36 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 endif()
 
 if(WIN32)
-    option(USE_MSVC_CFG "enable /guard:cf on msvc" ${USE_SIMPLE_HARDEN})
+    option(USE_MSVC_CFG "enable /guard:cf on msvc" OFF)
+    if(NOT USE_MSVC_CFG AND USE_SIMPLE_HARDEN AND NOT USE_CFI)
+        set(USE_MSVC_CFG ON)
+    endif()
     if(USE_MSVC_CFG)
-        if(USE_CFI)
-            #message(WARNING "USE_CFI overrides USE_MSVC_CFG")
-        elseif(MSVC)
+        if(MSVC)
             target_compile_options(ALL_SANITIZERS INTERFACE /guard:cf)
             target_link_options(ALL_SANITIZERS INTERFACE /guard:cf)
         elseif(MY_CLANGCL)
             target_compile_options(ALL_SANITIZERS INTERFACE -Xclang -cfguard)
             target_link_options(ALL_SANITIZERS INTERFACE -Xlinker /guard:cf)
+            # TODO: I should reuse this...
+        elseif(MY_CLANG)
+            target_compile_options(ALL_SANITIZERS INTERFACE -mguard=cf)
+            target_link_options(ALL_SANITIZERS INTERFACE -mguard=cf)
         else()
             #I probably could get it working on mingw (at least clang), I just don't know the flag.
             message(WARNING "/guard:cf unsupported")
         endif()
+    endif()
+endif()
+
+option(USE_CET "enable -fcf-protection=full or /CETCOMPAT, needs newish CPU's" OFF)
+if(USE_CET)
+    if(MSVC)
+        target_compile_options(ALL_SANITIZERS INTERFACE /CETCOMPAT)
+        target_link_options(ALL_SANITIZERS INTERFACE /CETCOMPAT)
+    else()
+        target_compile_options(ALL_SANITIZERS INTERFACE -fcf-protection=full)
+        target_link_options(ALL_SANITIZERS INTERFACE -fcf-protection=full)
     endif()
 endif()
 
@@ -429,17 +502,17 @@ if(NOT WIN32)
         target_compile_options(ALL_SANITIZERS INTERFACE -fstack-clash-protection)
         target_link_options(ALL_SANITIZERS INTERFACE -fstack-clash-protection)
     endif()
+endif()
 
-    option(USE_STACK_PROTECTOR "enable -fstack-protector-strong (linux only)" OFF)
-    if(USE_STACK_PROTECTOR)
-        target_compile_options(ALL_SANITIZERS INTERFACE -fstack-protector-strong)
-        target_link_options(ALL_SANITIZERS INTERFACE -fstack-protector-strong)
-    endif()
+option(USE_STACK_PROTECTOR "enable -fstack-protector-strong" OFF)
+if(USE_STACK_PROTECTOR)
+    target_compile_options(ALL_SANITIZERS INTERFACE -fstack-protector-strong)
+    target_link_options(ALL_SANITIZERS INTERFACE -fstack-protector-strong)
+endif()
 
-    if(NOT USE_STACK_PROTECTOR AND USE_SIMPLE_HARDEN)
-        target_compile_options(ALL_SANITIZERS INTERFACE -fstack-protector)
-        target_link_options(ALL_SANITIZERS INTERFACE -fstack-protector)
-    endif()
+if(NOT USE_STACK_PROTECTOR AND USE_SIMPLE_HARDEN)
+    target_compile_options(ALL_SANITIZERS INTERFACE -fstack-protector)
+    target_link_options(ALL_SANITIZERS INTERFACE -fstack-protector)
 endif()
 
 #
@@ -519,8 +592,36 @@ add_executable(${PROJECT_NAME}
         code/datastructures/event_listener_observer.cpp
 )
 
+
 #uhh... this should be part of MY_COMPILER_FLAGS, but I chose not...
-add_library(MY_OPTIONS_FLAGS INTERFACE)
+add_library(MY_OPTIONS_FLAGS INTERFACE EXCLUDE_FROM_ALL)
+
+option(USE_SMALLER_DEBUG_INFO "reduce the debug info size even if it harms the info" OFF)
+if(USE_SMALLER_DEBUG_INFO)
+if(MY_CLANG)
+    target_compile_options(MY_OPTIONS_FLAGS INTERFACE -gline-tables-only)
+    target_link_options(MY_OPTIONS_FLAGS INTERFACE -gline-tables-only )
+elseif(MSVC)
+    # much smaller binary, but this will damage the debug info.
+    # a better option would be to replace /PDB with /PDBSTRIPPED, and copy the stripped PDB during install
+    target_link_options(MY_OPTIONS_FLAGS INTERFACE /OPT:REF)
+else(GNUC)
+    # or -fno-standalone-debug or
+    target_compile_options(MY_OPTIONS_FLAGS INTERFACE -g1)
+    target_link_options(MY_OPTIONS_FLAGS INTERFACE -g1)
+endif()
+endif()
+
+# this works surprisingly well, similar results as clang-cl (not too surprising)
+# msvc SEEMS to give better results however when it comes to optimized debug info.
+# but not tested much.
+if(MINGW)
+    option(USE_MINGW_PDB "make mingw use codeview pdb files" OFF)
+    if(USE_MINGW_PDB)
+        target_compile_options(MY_OPTIONS_FLAGS INTERFACE -gcodeview)
+        target_link_options(MY_OPTIONS_FLAGS INTERFACE -Wl,--pdb=)
+    endif()
+endif()
 
 
 # flags to make the core library work as a terminal application.
@@ -538,9 +639,8 @@ else()
     #find_package(Boost CONFIG REQUIRED COMPONENTS spirit)
     #target_link_libraries(${PROJECT_NAME} Boost::spirit)
 
-    # boost parser works standalone (but needs boost hana for structs, I use tuples atm)
-    # but boost parser needs C++ exceptions (ew).
-    # I don't know why but debug clang (msvc) will crash on exceptions (invalid access, but reldeb works)
+    # boost parser works standalone (but needs boost hana for structs, I use tuples atm, and hana pulls a lot of boost)
+    # but unlike boost spirit... boost parser needs C++ exceptions (I don't mind exceptions, clang-cl+asan does).
     target_include_directories(MY_OPTIONS_FLAGS SYSTEM INTERFACE "${CMAKE_SOURCE_DIR}/parser/include")
 
     # non virtual member function call, something with std::any casting.
@@ -579,13 +679,14 @@ if(USE_PCH)
     target_precompile_headers(MY_OPTIONS_FLAGS INTERFACE "code/core/global_pch.h")
 endif()
 
+#TODO: this should be a cvar...
 if(WIN32)
     # it's slow because everything is still utf8, but at the last step I convert it to wchar_t
     # but slogf is much worse, it is vasprintf -> convert to wchar_t -> fwrite(stdout, wchar)
     # this has nothing to do with the utf8 manifest option,
     # for that to work you need to set the experimental utf8 localization in system settings, or set chcp 65001
     # This will probably be replaced with SetConsoleOutputCP(CP_UTF8) which is identical to chcp 65001,
-    # but it triggers Address sanitizer when I use conemu... (I might need to update it).
+    # but it triggers Address sanitizer when I use conemu... (very specific to me...).
     option(WIN_UNICODE_HACK "this will output utf8 to the console, but it's very SLOW!!!" OFF)
     if(WIN_UNICODE_HACK)
         target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE WIN_UNICODE_HACK)
@@ -593,16 +694,20 @@ if(WIN32)
 endif()
 
 
-#enable this just in case (clang on linux doesn't default to PIE)
-option(USE_PIE "Enables ASLR in case it's off" ${USE_SIMPLE_HARDEN})
+# enable this just in case (clang on linux doesn't default to PIE)
+option(USE_PIE "Enables ASLR in case it's off" OFF)
 include(CheckPIESupported)
-check_pie_supported()
-set_property(TARGET MY_OPTIONS_FLAGS PROPERTY POSITION_INDEPENDENT_CODE ${USE_PIE})
+check_pie_supported(OUTPUT_VARIABLE output LANGUAGES CXX)
+set_property(TARGET ${PROJECT_NAME} PROPERTY POSITION_INDEPENDENT_CODE ${USE_PIE} OR ${USE_SIMPLE_HARDEN})
+if(USE_PIE AND NOT CMAKE_CXX_LINK_PIE_SUPPORTED)
+    message(FATAL_ERROR "PIE is not supported at link time:\n${output}"
+            "PIE link options will not be passed to linker.")
+endif()
 
 if(NOT WIN32 AND USE_SIMPLE_HARDEN)
 # -Wl,-z,relro,-z,now
 # OR use -fno-plt which is more aggressive?
-    target_link_options(MY_OPTIONS_FLAGS INTERFACE -Wl,-z,relro,-z,now)
+    target_link_options(MY_OPTIONS_FLAGS PRIVATE -Wl,-z,relro,-z,now)
 endif()
 
 #
@@ -623,16 +728,23 @@ if(USE_CPP_STACKTRACE)
     target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE USE_CPP_STACKTRACE)
 endif()
 
-# this technically should work with mingw, but it won't print non-mingw symbols which is bad
-# maybe vcpkg could work, I have not tried.
 option(USE_LIBBACKTRACE "to print stack traces" OFF)
 if(USE_LIBBACKTRACE)
-    target_compile_definitions(MY_OPTIONS_FLAGS INTERFACE USE_LIBBACKTRACE)
-    #libbacktrace doesn't have a cmake thing
-    target_link_libraries(MY_OPTIONS_FLAGS "-lbacktrace")
-
-    #need this to print the module name with libbacktrace
-    target_link_libraries(MY_OPTIONS_FLAGS "-ldl")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_LIBBACKTRACE)
+    if(LINUX)
+        target_link_libraries(${PROJECT_NAME} "-lbacktrace")
+        target_link_libraries(${PROJECT_NAME} "-ldl")
+    elseif(MINGW)
+        # This only works with vcpkg for mingw.
+        # ATM I have libbacktrace installed in msys and I am too lazy to remove it.
+        # It will say that it wont work on windows, but it will.
+        # I use the clang64 msys terminal to install with vcpkg
+        # ./vcpkg install --triplet=x64-mingw-dynamic libbacktrace --allow-unsupported
+        # You could compile or install it from msys, and it will use less space.
+        target_link_libraries(${PROJECT_NAME} "$<PATH:CMAKE_PATH,$ENV{MY_VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/lib/libbacktrace.a>")
+    else()
+        message(FATAL_ERROR "platform does not have libbacktrace")
+    endif()
 endif()
 
 option(USE_WIN32_DEBUG_INFO "to print stack traces, requires dbghelp.dll to be supplied" OFF)
@@ -689,6 +801,11 @@ else()
 endif()
 
 if(NOT TL_COMPILE_TIME_TRANSLATION)
+    add_custom_command(
+            TARGET ${PROJECT_NAME}
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${PROJECT_SOURCE_DIR}/translations $<TARGET_FILE_DIR:${PROJECT_NAME}>/translations
+            COMMENT "copying translation files")
     file(GLOB TRANSLATION_FILES ${PROJECT_SOURCE_DIR}/translations/*.inl)
     install(FILES ${TRANSLATION_FILES} DESTINATION ${EXECUTABLE_INSTALLATION_PATH}/translations )
 endif()
@@ -717,32 +834,50 @@ else()
 endif()
 endif()
 
-# copy asan so that it works inside the build directory without an IDE, because vcpkg wont.
-if(USE_ASAN AND WIN32)
-    if(MSVC)
-        # this should be in vcvarsall.bat
-        find_file(ASAN_LIBRARY NAMES clang_rt.asan_dynamic-x86_64.dll)
 
-        if (ASAN_LIBRARY)
-            message(STATUS "Found Asan library: ${ASAN_LIBRARY}")
-        else()
-            message(WARNING "Asan library library not found.")
-        endif()
-        #set(ASAN_LOCATION "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64" CACHE FILEPATH "The path to clang_rt.asan_dynamic-x86_64.dll")
-    elseif(MY_CLANGCL)
-        set(ASAN_LIBRARY ${USE_CLANG_CL_ASAN_PATH}/clang_rt.asan_dynamic-x86_64.dll CACHE FILEPATH "The clang path to clang_rt.asan_dynamic-x86_64.dll")
-    else()
-        message(ERROR "use asan on window but not MSVC or Clang-CL")
-    endif()
+if(MINGW)
+    # I need msys because I can't figure out how to make vcpkg detect that I am using mingw.
+    # I was able to just copy llvm-mingw into the clang64 folder of msys (because I already downloaded it)
+    # and it will work perfectly fine with the clang terminal!
+    # https://github.com/mstorsjo/llvm-mingw
+    # I don't think there is any reason to use this particular build of llvm (msys has the same libc++/libunwind)
+    # BUT I want to building llvm from source so that I can try out iterator checks and sanitizers.
+    # Not sure if dumping clang into the clang64 folder is safe/correct, it will conflict with pacman packages.
+    set(USE_MINGW_BIN_PATH "C:/msys64/clang64/bin" CACHE PATH "The /bin of your mingw, that contains compilers/dll's")
     add_custom_command(
             TARGET ${PROJECT_NAME}
             POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ASAN_LIBRARY} ${CMAKE_CURRENT_BINARY_DIR}
-            COMMENT "copying clang_rt.asan_dynamic-x86_64.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${USE_MINGW_BIN_PATH}/libc++.dll ${USE_MINGW_BIN_PATH}/libunwind.dll $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            COMMENT "copying libc++ and unwind"
     )
+    #install(FILES ${LIBCPP_FILE} ${LIBUNWIND_FILE} DESTINATION ${EXECUTABLE_INSTALLATION_PATH} )
+endif()
+
+# copy asan so that it works inside the build directory without an IDE, because vcpkg wont...
+if(USE_ASAN AND WIN32)
+    if(MSVC)
+        # this should be in vcvarsall.bat
+        find_file(ASAN_LIBRARY clang_rt.asan_dynamic-x86_64.dll REQUIRED)
+    elseif(MY_CLANGCL)
+        find_file(ASAN_LIBRARY clang_rt.asan_dynamic-x86_64.dll HINTS ${USE_CLANG_CL_ASAN_PATH} REQUIRED)
+    elseif(MINGW)
+        find_file(ASAN_LIBRARY libclang_rt.asan_dynamic-x86_64.dll HINTS ${USE_MINGW_BIN_PATH} REQUIRED)
+    else()
+        message(FATAL_ERROR "unsupported windows asan platform")
+    endif()
+    if (ASAN_LIBRARY)
+        message(STATUS "Found Asan library: ${ASAN_LIBRARY}")
+        add_custom_command(
+                TARGET ${PROJECT_NAME}
+                POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ASAN_LIBRARY} $<TARGET_FILE_DIR:${PROJECT_NAME}>
+                COMMENT "copying clang_rt.asan_dynamic-x86_64.dll"
+        )
+    else()
+        message(WARNING "Asan library library not found.")
+    endif()
     # I don't need to install it because I already copy it with GET_RUNTIME_DEPENDENCIES
-    # The reason I add_custom_command is because the build directory won't work without asan.
-    #install(FILES ${CMAKE_CURRENT_BINARY_DIR}/clang_rt.asan_dynamic-x86_64.dll DESTINATION ${EXECUTABLE_INSTALLATION_PATH})
+    #install(FILES ${ASAN_LIBRARY} DESTINATION ${EXECUTABLE_INSTALLATION_PATH})
 endif()
 
 

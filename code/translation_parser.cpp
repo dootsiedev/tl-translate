@@ -195,10 +195,9 @@ namespace parse_printf_specifier
 // AND it would be wrong to store the log files in binary instead of plain text, because
 // it breaks between every update, and it's possible that the log system itself crashes.
 // and that's bad because I would try to send the log with error reporting software.
-//bp::rule<class any_specifier, int> const any_specifier = "'%c', '%s', '%d', or '%g', and etc";
-bp::rule<class specifier_root> const specifier_root =
-	"'%c', '%s', '%d', or '%g', and etc";
-bp::symbols<int> const any_specifier = {
+bp::rule<class any_specifier, int> const any_specifier = "'%c', '%s', '%d', or '%g', and etc";
+bp::rule<class specifier_root> const specifier_root = "'%c', '%s', '%d', or '%g', and etc";
+bp::symbols<int> const any_specifier_def = {
 	{"c", 1},
 	{"f", 2},
 	{"F", 2},
@@ -220,15 +219,6 @@ bp::symbols<int> const any_specifier = {
 	{"s", 4},
 	{"p", 8}};
 
-// a real dumb hack. I also considered using bp::transform, but it would be uglier.
-auto set_min_width_flag = [](auto& ctx) {
-	ASSERT(!bp::_globals(ctx).variable_min_width_flag);
-	bp::_globals(ctx).variable_min_width_flag = true;
-};
-auto set_field_width_flag = [](auto& ctx) {
-	ASSERT(!bp::_globals(ctx).variable_field_width_flag);
-	bp::_globals(ctx).variable_field_width_flag = true;
-};
 
 auto check_number = [](auto& ctx) {
 	// if you had control of the string, a lot worse could be done,
@@ -242,14 +232,25 @@ auto check_number = [](auto& ctx) {
 	}
 };
 
-auto const number_ignore =
-	// NOTE: is omit the same as & (?)
-	bp::omit[bp::int_[check_number]];
+// is %0-1d valid? like technically the spec says 1 or more modifiers, and 0/- are modifiers.
+// I am missing ' ', and #, and much more, but I am happy being more strict.
+// NOTE: is omit the same as & (?)
+auto const number_ignore = bp::omit[bp::int_[check_number]];
+
+// set the flags, I could use one function and use _local parameters, I think?
+auto set_min_width_flag = [](auto& ctx) {
+	ASSERT(!bp::_globals(ctx).variable_min_width_flag);
+	bp::_globals(ctx).variable_min_width_flag = true;
+};
+auto set_field_width_flag = [](auto& ctx) {
+	ASSERT(!bp::_globals(ctx).variable_field_width_flag);
+	bp::_globals(ctx).variable_field_width_flag = true;
+};
 
 //%*.* or %1.1 or %1 or %1. (including negative signs)
 auto const min_width_and_field_width =
 	(number_ignore | bp::lit('*')[set_min_width_flag] | bp::eps) >>
-	(bp::lit('.') >> (number_ignore | bp::lit('*')[set_field_width_flag] | bp::eps));
+	-(bp::lit('.') >> (number_ignore | bp::lit('*')[set_field_width_flag] | bp::eps));
 #if 0
 // I thought that %.s was an error, but it just sets the width to 0 which means nothing is printed.
 bp::rule<class field_width> const field_width =
@@ -268,9 +269,10 @@ auto const add_specifier = [](auto& ctx) {
 // I manually check for % before running the parser
 //  I also use bp::eps > ... on bp::prefix_parse,
 //  I tried to put it here, but it didn't print a nice error I think
-auto const specifier_root_def = -min_width_and_field_width >> any_specifier[add_specifier];
+auto const specifier_root_def =
+	any_specifier[add_specifier] | (min_width_and_field_width > any_specifier)[add_specifier];
 
-BOOST_PARSER_DEFINE_RULES(specifier_root);
+BOOST_PARSER_DEFINE_RULES(specifier_root, any_specifier);
 
 // pass the error handler to the parent handler
 // I wonder if it would be better if I just merged the parsers instead of splitting them...

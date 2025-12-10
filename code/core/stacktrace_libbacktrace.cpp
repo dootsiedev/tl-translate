@@ -1,8 +1,12 @@
 // This is an independent project of an individual developer. Dear PVS-Studio, please check it.
 // PVS-Studio Static Code Analyzer for C, C++, C#, and Java: https://pvs-studio.com
 
-#include "global_pch.h"
 #include "global.h"
+
+// ASSERT will call debug_stacktrace, do not call ASSERT here.
+#undef ASSERT
+
+#include <cassert>
 
 #include "stacktrace.h"
 
@@ -11,13 +15,9 @@
 #include <cinttypes>
 #include <cstdio>
 
-// because I don't include global.h
-#include <cassert>
-#ifndef ASSERT
-#define ASSERT assert
-#endif
-
 #include <memory>
+
+#include "../util/string_tools.h"
 
 static int has_libbacktrace
 #if defined(USE_LIBBACKTRACE)
@@ -25,11 +25,9 @@ static int has_libbacktrace
 #else
 	= 0;
 #endif
-static REGISTER_CVAR_INT(
+REGISTER_CVAR_INT(
 	cv_has_stacktrace_libbacktrace, has_libbacktrace, "0 = not found, 1 = found", CVAR_T::READONLY);
 
-
-#ifndef USE_WIN32_DEBUG_INFO
 #ifndef __EMSCRIPTEN__
 
 // I haven't tested it, but I think msys could work with libbacktrace.
@@ -44,197 +42,540 @@ static REGISTER_CVAR_INT(
 #include <cxxabi.h>
 #endif
 
-
-
-
-struct bt_payload
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+// stolen from whereami.h
+int getModulePath_(HMODULE module, char* out, int capacity, int* dirname_length)
 {
-	debug_stacktrace_callback call = NULL;
-	int idx = 0;
-	void* ud = NULL;
-	// nested syminfo call...
-	backtrace_state* state;
-	// I don't want to get the module again when I use syminfo.
-	const char* syminfo_module = NULL;
+	// TODO: I could avoid finding the address 2 times... I could return a unique_ptr.
+	// but if I wanted performance... I could use MAX_PATH + get rid of wide functions.
+	wchar_t buffer1[MAX_PATH];
+	wchar_t buffer2[MAX_PATH];
+	wchar_t* path;
+	// this was modified.
+	std::unique_ptr<wchar_t[]> path_buf;
+	int length = -1;
+
+	for(;;)
+	{
+		DWORD size;
+		int length_, length__;
+
+		size = GetModuleFileNameW(module, buffer1, std::size(buffer1));
+
+		if(size == 0) break;
+		if(size == std::size(buffer1))
+		{
+			DWORD size_ = size;
+			int count = 0;
+			do
+			{
+				// I don't trust this loop.
+				if(count > 100)
+				{
+					fprintf(stderr, "%s: infinite loop \n", __func__);
+					return -1;
+				}
+				++count;
+				// this is a lot worse than the original realloc code...
+				auto temp = std::move(path_buf);
+				path_buf = std::make_unique<wchar_t[]>(size_ * 2);
+				memcpy(path_buf.get(), temp.get(), size_);
+				path = path_buf.get();
+				temp.reset();
+
+				size_ *= 2;
+				// path = path_;
+				size = GetModuleFileNameW(module, path, size_);
+			} while(size == size_);
+
+			if(size == size_) break;
+		}
+		else
+			path = buffer1;
+
+		if(!_wfullpath(buffer2, path, MAX_PATH)) break;
+		length_ = wcslen(buffer2);
+		length__ = WideCharToMultiByte(CP_UTF8, 0, buffer2, length_, out, capacity, NULL, NULL);
+
+		if(length__ == 0)
+			length__ = WideCharToMultiByte(CP_UTF8, 0, buffer2, length_, NULL, 0, NULL, NULL);
+		if(length__ == 0) break;
+
+		if(length__ <= capacity && dirname_length)
+		{
+			int i;
+
+			for(i = length__ - 1; i >= 0; --i)
+			{
+				if(out[i] == '\\')
+				{
+					*dirname_length = i;
+					break;
+				}
+			}
+		}
+
+		length = length__;
+
+		break;
+	}
+
+	return length;
+}
+
+int getModulePath(void* address, char* out, int capacity, int* dirname_length)
+{
+	HMODULE module;
+	int length = -1;
+
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4054)
+#endif
+	if(GetModuleHandleEx(
+		   GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		   static_cast<LPCTSTR>(address),
+		   &module))
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+	{
+		length = getModulePath_(module, out, capacity, dirname_length);
+	}
+
+	return length;
+}
+
+#endif
+
+enum
+{
+	BT_EARLY_EXIT_RETURN = 123456
 };
-
-static void bt_error_callback(void* vdata, const char* msg, int errnum)
-{
-	(void)errnum;
-	ASSERT(vdata != NULL);
-	bt_payload* payload = static_cast<bt_payload*>(vdata);
-	ASSERT(payload->call != NULL);
-
-	if(payload == NULL || payload->call == NULL)
-	{
-		fprintf(stderr, "libbacktrace error: %s\n", (msg != NULL ? msg : "no error?"));
-		return;
-	}
-
-	payload->call(NULL, (msg != NULL ? msg : "no error?"), payload->ud);
-}
-
-static void bt_syminfo_callback(
-	void* vdata, uintptr_t pc, const char* function, uintptr_t symval, uintptr_t symsize)
-{
-	bt_payload* payload = static_cast<bt_payload*>(vdata);
-	(void)symval;
-	(void)symsize;
-#ifdef __GNUG__
-	auto free_del = [](void* ptr) { free(ptr); };
-	std::unique_ptr<char, decltype(free_del)> demangler{NULL, free_del};
-	if(cv_bt_demangle.data != 0 && function != NULL)
-	{
-		int status = 0;
-		demangler.reset(abi::__cxa_demangle(function, NULL, NULL, &status));
-		if(status == 0)
-		{
-			function = demangler.get();
-		}
-	}
-#endif
-	debug_stacktrace_info info{payload->idx, pc, payload->syminfo_module, function, NULL, 0};
-
-	payload->call(&info, NULL, payload->ud);
-}
-
-static int bt_full_callback(
-	void* vdata, uintptr_t pc, const char* filename, int lineno, const char* function)
-{
-	bt_payload* payload = static_cast<bt_payload*>(vdata);
-
-	// don't know why this is always at the bottom of the stack in libbacktrace
-	if(pc == static_cast<uintptr_t>(-1))
-	{
-		return 0;
-	}
-
-	// TODO: I don't use cv_bt_max_depth, it would be nice if I did.
-	++payload->idx;
-
-	const char* module_name = NULL;
-
-	// TODO: on windows I could get the module name without windbg
-	// 	by referencing whereami
-	// something like: GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-	// | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT
-	// then use wai getModulePath_
-#if defined(__linux__)
-
-	// gotta memcpy because it's possible uintptr_t and void* have incompatible alignment
-	// clang-tidy will nag me if I cast it...
-	void* addr;
-	memcpy(&addr, &pc, sizeof(void*));
-
-	Dl_info dinfo;
-	if(dladdr(addr, &dinfo) != 0)
-	{
-		module_name = dinfo.dli_fname;
-		if(cv_bt_full_paths.data == 0)
-		{
-			const char* temp_module_name = strrchr(dinfo.dli_fname, '/');
-			if(temp_module_name != NULL)
-			{
-				module_name = temp_module_name + 1;
-			}
-		}
-
-		// a fallback, this only works because the functions are public
-		// this won't work if you use -fvisibility=hidden, or inline optimizations.
-		if(function == NULL)
-		{
-			function = dinfo.dli_sname;
-		}
-	}
-
-	if(function == NULL)
-	{
-		// backtrace_syminfo requires the symbol table but does not require the debug info
-		// technically this should give the same result as dinfo.dli_sname, but maybe it does something else?
-		// this works with mingw, but you should use StalkWalk + Dbghelp to handle both mingw and msvc debug info.
-		payload->syminfo_module = module_name;
-		if(backtrace_syminfo(payload->state, pc, bt_syminfo_callback, bt_error_callback, vdata) ==
-		   1)
-		{
-			return 0;
-		}
-	}
-#endif
-
-#ifdef __GNUG__
-	auto free_del = [](void* ptr) { free(ptr); };
-	std::unique_ptr<char, decltype(free_del)> demangler{NULL, free_del};
-	if(cv_bt_demangle.data != 0 && function != NULL)
-	{
-		int status = 0;
-		demangler.reset(abi::__cxa_demangle(function, NULL, NULL, &status));
-		if(status == 0)
-		{
-			function = demangler.get();
-		}
-	}
-#endif
-
-	if(filename != NULL)
-	{
-		if(cv_bt_full_paths.data == 0)
-		{
-			const char* temp_filename = strrchr(filename, '/');
-			if(temp_filename != NULL)
-			{
-				filename = temp_filename + 1;
-			}
-		}
-	}
-
-	debug_stacktrace_info info{payload->idx, pc, module_name, function, filename, lineno};
-
-	// NOTE: can an error end the stack walk? I probably don't want that.
-	return payload->call(&info, NULL, payload->ud);
-}
 
 // wrapper because static initialization of a constructor is thread safe.
 struct bt_state_wrapper
 {
+	debug_stacktrace_observer* printer = nullptr;
 	backtrace_state* state;
-	explicit bt_state_wrapper(bt_payload& info)
-	: state(backtrace_create_state(NULL, 1, bt_error_callback, &info))
+
+	static void error_callback(void* vdata, const char* msg, int errnum)
 	{
+		static_cast<bt_state_wrapper*>(vdata)->bt_error_callback(msg, errnum);
+	};
+
+	explicit bt_state_wrapper(debug_stacktrace_observer* printer_)
+	: printer(printer_)
+	, state(backtrace_create_state(NULL, 1, error_callback, this))
+	{
+		// the printer passed in will be freed, so the printer is also freed.
+		printer = nullptr;
+	}
+
+	backtrace_state* get() const
+	{
+		return state;
+	}
+
+	void bt_error_callback(const char* msg, int errnum)
+	{
+		if(printer == nullptr)
+		{
+			// TODO: if errnum is positive it's an errno
+			fprintf(
+				stderr, "libbacktrace error(%d): %s\n", errnum, (msg != nullptr ? msg : "no error?"));
+			return;
+		}
+
+		printer->print_string_fmt(
+			"libbacktrace error(%d): %s\n", errnum, (msg != nullptr ? msg : "no error?"));
 	}
 };
 
-__attribute__((noinline)) bool
-	write_libbacktrace_stacktrace(debug_stacktrace_callback callback, void* ud, int skip)
+struct bt_payload
 {
-	bt_payload info;
-	info.call = callback;
-	info.ud = ud;
-	info.idx = 0;
-	info.syminfo_module = NULL;
+	explicit bt_payload(bt_state_wrapper& state_, debug_stacktrace_observer& printer_)
+	: state(state_)
+	, printer(printer_)
+	{
+	}
 
-	static bt_state_wrapper state(info);
-	info.state = state.state;
-	if(state.state == NULL)
+	int idx = 0;
+	// nested syminfo call...
+	bt_state_wrapper& state;
+	debug_stacktrace_observer& printer;
+	// I don't want to get the module again when I use syminfo...
+	const char* syminfo_module = nullptr;
+
+	int trimmed_frame_start = -1;
+
+#if 0
+    void bt_error_callback(void *vdata, const char *msg, int errnum) {
+        // remember to not use ASSERT
+        assert(vdata != NULL);
+        bt_payload *payload = static_cast<bt_payload *>(vdata);
+        assert(payload->printer != NULL);
+
+        if (payload == NULL || payload->printer == NULL) {
+            fprintf(stderr, "libbacktrace error: %s\n", (msg != NULL ? msg : "no error?"));
+            return;
+        }
+
+        // TODO: if errnum is positive it's an errno
+        payload->printer->print_string_fmt("libbacktrace error(%d): %s\n", errnum, (msg != NULL ? msg : "no error?"));
+    }
+#endif
+#if 1
+	static void bt_syminfo_callback_wrap(
+		void* vdata, uintptr_t pc, const char* function, uintptr_t symval, uintptr_t symsize)
+	{
+		(void)symval;
+		(void)symsize;
+		static_cast<bt_payload*>(vdata)->bt_syminfo_callback(pc, function);
+	}
+	void bt_syminfo_callback(uintptr_t pc, const char* function)
+	{
+#ifdef __GNUG__
+		auto free_del = [](void* ptr) { free(ptr); };
+		std::unique_ptr<char, decltype(free_del)> demangler{NULL, free_del};
+		if(cv_bt_demangle.data() != 0 && function != NULL)
+		{
+			int status = 0;
+			demangler.reset(abi::__cxa_demangle(function, NULL, NULL, &status));
+			if(status == 0)
+			{
+				function = demangler.get();
+			}
+		}
+#endif
+		debug_stacktrace_info info{idx, pc, syminfo_module, function, NULL, 0};
+		printer.print_line(&info);
+	}
+#endif
+
+	static void error_callback_wrap(void* vdata, const char* msg, int errnum)
+	{
+		static_cast<bt_payload*>(vdata)->error_callback(msg, errnum);
+	};
+
+	void error_callback(const char* msg, int errnum)
+	{
+		++idx;
+		printer.print_string_fmt(
+			"libbacktrace error(%d): %s\n", errnum, (msg != NULL ? msg : "no error?"));
+	}
+
+	static int bt_full_callback_wrap(
+		void* vdata, uintptr_t pc, const char* filename, int lineno, const char* function)
+	{
+		return static_cast<bt_payload*>(vdata)->bt_full_callback(pc, filename, lineno, function);
+	}
+	// I add +1 because backtrace_full won't match with the __builtin_return_address!
+	static int bt_full_callback_plus_one_wrap(
+		void* vdata, uintptr_t pc, const char* filename, int lineno, const char* function)
+	{
+		return static_cast<bt_payload*>(vdata)->bt_full_callback(
+			pc + 1, filename, lineno, function);
+	}
+
+	int bt_full_callback(uintptr_t pc, const char* filename, int lineno, const char* function)
+	{
+		// don't know why this is always at the bottom of the stack in libbacktrace
+		if(pc == static_cast<uintptr_t>(-1))
+		{
+			idx++;
+			return 0;
+		}
+
+		if(idx >= cv_bt_max_depth.data())
+		{
+			idx++;
+			return BT_EARLY_EXIT_RETURN;
+		}
+
+		if(trimmed_frame_start != -1 && idx >= trimmed_frame_start)
+		{
+			// I am counting the frames
+			// TODO: it would be faster to count if I used a simple callback!
+			//  technically on windows, I use
+			idx++;
+			return 0;
+		}
+
+		const char* module_name = NULL;
+
+#if defined(__linux__)
+		// gotta memcpy because it's possible uintptr_t and void* have incompatible alignment
+		// clang-tidy will nag me if I cast it...
+		void* addr;
+		memcpy(&addr, &pc, sizeof(void*));
+
+		Dl_info dinfo;
+		if(dladdr(addr, &dinfo) != 0)
+		{
+			module_name = dinfo.dli_fname;
+			if(cv_bt_full_paths.data() == 0)
+			{
+				module_name = remove_file_path(dinfo.dli_fname);
+			}
+
+			// a fallback, this only works because the functions are public
+			// this won't work if you use -fvisibility=hidden, or inline optimizations.
+			if(function == NULL)
+			{
+				function = dinfo.dli_sname;
+			}
+		}
+		if(function == NULL)
+		{
+			// backtrace_syminfo does not work. on mingw.
+			// I don't know if it works on linux.
+			// backtrace_syminfo requires the symbol table but does not require the debug info.
+			// I assume on linux this gives the same result as dinfo.dli_sname?
+			payload->syminfo_module = module_name;
+			if(backtrace_syminfo(
+				   payload->state, pc, bt_syminfo_callback, bt_error_callback, vdata) == 1)
+			{
+				payload->check_trimmed(pc);
+				payload->idx++;
+				return 0;
+			}
+		}
+#else
+#ifdef USE_WIN32_DEBUG_INFO
+		if(function == NULL)
+		{
+			// dbghelp modules will not have a path or file extension.
+			//  I could easily fix that, but I like using it as a hint.
+			if(debug_win32_write_function_detail(pc, printer))
+			{
+				check_trimmed(pc, function);
+				idx++;
+				return 0;
+			}
+		}
+#endif
+
+		// I could probably cache the module address
+		// and reuse it instead of finding the path for every frame.
+		// and I could also avoid some allocations.
+		// but I have not benchmarked this.
+		void* addr;
+		memcpy(&addr, &pc, sizeof(void*));
+		int length = getModulePath(addr, nullptr, 0, nullptr);
+		std::unique_ptr<char[]> path = std::make_unique<char[]>(length + 1);
+		if(getModulePath(addr, path.get(), length, nullptr) == length)
+		{
+			path[length] = '\0';
+			module_name = path.get();
+			if(cv_bt_full_paths.data() == 0)
+			{
+				module_name = remove_file_path(module_name);
+			}
+		}
+#endif
+
+#ifdef __GNUG__
+		auto free_del = [](void* ptr) { free(ptr); };
+		std::unique_ptr<char, decltype(free_del)> demangler{NULL, free_del};
+		if(cv_bt_demangle.data() != 0 && function != NULL)
+		{
+			int status = 0;
+			demangler.reset(abi::__cxa_demangle(function, NULL, NULL, &status));
+			switch(status)
+			{
+			case 0: function = demangler.get(); break;
+			case -1:
+				printer.print_string(
+					"abi::__cxa_demangle(-1): A memory allocation failure occurred.\n");
+				break;
+			case -2:
+				// this is spammy.
+				// payload->printer->print_string(
+				//	"abi::__cxa_demangle(-2): mangled_name is not a valid name under the C++ ABI
+				// mangling rules.\n");
+				break;
+			case -3:
+				printer.print_string("abi::__cxa_demangle(-3_: One of the arguments is invalid.\n");
+				break;
+			default: printer.print_string_fmt("abi::__cxa_demangle(%d): unknown status.\n", status);
+			}
+		}
+#endif
+
+		if(filename != NULL)
+		{
+			if(cv_bt_full_paths.data() == 0)
+			{
+				filename = remove_file_path(filename);
+			}
+		}
+
+		debug_stacktrace_info info{idx + 1, pc, module_name, function, filename, lineno};
+
+		// NOTE: I could make an error will stop the stacktrace... do I want that?
+		printer.print_line(&info);
+		check_trimmed(pc, function);
+		idx++;
+		return 0;
+	}
+
+	void check_trimmed(uintptr_t addr, const char* function)
+	{
+		// convert the address to the same type
+		if(cv_bt_trim_stacktrace.data() != 0 && g_trim_return_address != nullptr)
+		{
+			uintptr_t address_copy;
+			memcpy(&address_copy, &g_trim_return_address, sizeof(address_copy));
+			if(addr == address_copy)
+			{
+				if(trimmed_frame_start != -1)
+				{
+					printer.print_string_fmt("info: trim function found again at: %d\n", idx);
+				}
+				else
+				{
+					// printer->print_string("info: g_trim_return_address WORKS! get rid of the
+					// other code!\n");
+					//  I start trimming 1 frame below the target.
+					trimmed_frame_start = idx + 1;
+					return;
+				}
+			}
+			(void)function;
+#if 0
+			if(function == nullptr)
+			{
+				return;
+			}
+			// I think the best way to avoid this is to just use libunwind.
+			// But using DbgHelp StackWalk -> backtrace_pcinfo works decently.
+			// AND I use DbgHelp for getting the Module name (BUT there are other ways to get it)
+			// Instead of using StackWalk, I could use RtlCaptureStackBackTrace to avoid DbgHelp
+			// BUT... StackWalk only works because I can access the ReturnAddr...
+#define TRIM_FUNCTION_MAP(XX) \
+	XX(SDL_Init)              \
+	XX(SDL_AppIterate)        \
+	XX(SDL_AppEvent)          \
+	XX(SDL_AppQuit)
+#define XX(x)                                                                          \
+	if(strcmp(function, #x) == 0)                                                      \
+	{                                                                                  \
+		if(trimmed_frame_start != -1)                                                  \
+		{                                                                              \
+			printer.print_string_fmt("info: trim function found again at: %d\n", idx); \
+		}                                                                              \
+		else                                                                           \
+		{                                                                              \
+		}                                                                              \
+		return;                                                                        \
+	}
+			TRIM_FUNCTION_MAP(XX)
+#undef XX
+#endif
+		}
+	}
+};
+
+bt_state_wrapper& get_bt_state(debug_stacktrace_observer* printer)
+{
+	static bt_state_wrapper state(printer);
+	return state;
+}
+
+__attribute__((noinline)) bool
+	write_libbacktrace_stacktrace(debug_stacktrace_observer& printer, int skip)
+{
+	bt_payload info(get_bt_state(&printer), printer);
+	if(info.state.get() == nullptr)
 	{
 		return false;
 	}
-#if 0
-	TIMER_U tick1;
-	TIMER_U tick2;
-	tick1 = timer_now();
+	// resolving the debug info is very slow, but you could offload the overhead by using
+	// backtrace_simple and in another thread you can resolve the debug info from backtrace_pcinfo
+	int ret = backtrace_full(
+		info.state.get(),
+		cv_bt_ignore_skip.data() == 0 ? (skip + 1) : 0,
+
+#ifdef __MINGW32__
+		bt_payload::bt_full_callback_plus_one_wrap,
+#else
+		// TODO: I need to test linux & and building libbacktrace before I remove this.
+		bt_payload::bt_full_callback_wrap,
 #endif
+		bt_payload::error_callback_wrap,
+		&info);
+
+	trim_stacktrace_print_helper(printer, info.trimmed_frame_start, info.idx);
+	return ret == 0 || ret == BT_EARLY_EXIT_RETURN;
+}
+
+#ifdef __MINGW32__
+
+__attribute__((noinline)) bool
+	write_libbacktrace_mingw_stacktrace(debug_stacktrace_observer& printer, int skip)
+{
+	bt_payload info(get_bt_state(&printer), printer);
+	if(info.state.get() == nullptr)
+	{
+		return false;
+	}
+
+	// I noticed that using this would not give the optimized address for SDL_AppXXX functions...
+	// Also this will print inlined templates (I wonder why libbacktrace excludes it)
+	// BUT inlined templates are very incorrect, so I wonder what is going on...
+	std::unique_ptr<void*[]> stack_info = std::make_unique<void*[]>(cv_bt_max_depth.data());
+
+	// apparently this function breaks easily with anything nonstandard.
+	// TODO: I think <stacktrace> won't retrieve function name, until you call name()
+	//  if that is true, I can just use the address part.
+	int result = RtlCaptureStackBackTrace(
+		cv_bt_ignore_skip.data() == 0 ? (skip + 1) : 0,
+		cv_bt_max_depth.data() + 1,
+		stack_info.get(),
+		nullptr);
+
+	int ret = 0;
+	for(int i = 0; i < result && ret != BT_EARLY_EXIT_RETURN; i++)
+	{
+		uintptr_t address_copy;
+		memcpy(&address_copy, &stack_info[i], sizeof(address_copy));
+		ret = backtrace_pcinfo(
+			info.state.get(),
+			address_copy,
+			bt_payload::bt_full_callback_wrap,
+			bt_payload::error_callback_wrap,
+			&info);
+	}
+
+	trim_stacktrace_print_helper(printer, info.trimmed_frame_start, info.idx);
+
+	return result > 0;
+}
+#endif
+
+__attribute__((noinline)) bool
+	write_libbacktrace_function_detail(uintptr_t stack_frame, debug_stacktrace_observer& printer)
+{
+	bt_payload info(get_bt_state(&printer), printer);
+	if(info.state.get() == nullptr)
+	{
+		return false;
+	}
 	// resolving the debug info is very slow, but you could offload the overhead by using
 	// backtrace_simple and in another thread you can resolving the debug info from backtrace_pcinfo
-	int ret = backtrace_full(state.state, skip + 1, bt_full_callback, bt_error_callback, &info);
+	int ret = backtrace_pcinfo(
+		info.state.get(),
+		stack_frame,
+		bt_payload::bt_full_callback_wrap,
+		bt_payload::error_callback_wrap,
+		&info);
 
-#if 0
-	tick2 = timer_now();
-	slogf("bt time = %f\n", timer_delta_ms(tick1, tick2));
-#endif
 	return ret == 0;
 }
 
 #endif
 
 #endif // __EMSCRIPTEN__
-#endif // USE_WIN32_DEBUG_INFO

@@ -41,6 +41,7 @@ static const char* get_lang_long_name(TL_LANG lang)
 #include "tl_end_macro.txt"
 	return "<UNKNOWN LANG>";
 }
+// NOLINTBEGIN("readability-duplicate-include")
 static const char* get_lang_short_name(TL_LANG lang)
 {
 #define TL_START(lang, short_name, ...) \
@@ -184,6 +185,7 @@ const char* translation_context::format_translations::get_index_key(tl_index fin
 #include "tl_end_macro.txt"
 	return "<format_translations::get_index_key:notfound>";
 }
+// NOLINTEND("readability-duplicate-include")
 
 #ifndef TL_COMPILE_TIME_ASSERTS
 tl_index translation_context::format_translations::get_index(const char* text)

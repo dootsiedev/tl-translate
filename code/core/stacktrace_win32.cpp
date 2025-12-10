@@ -6,18 +6,28 @@
 
 #include "stacktrace.h"
 
+// for remove_file_path
 #include "../util/string_tools.h"
 
 #ifdef USE_WIN32_DEBUG_INFO
 static int has_stacktrace_dbghelp = 1;
+static CVAR_T disable_cvar_if_no_dbghelp = CVAR_T::RUNTIME;
 #else
 static int has_stacktrace_dbghelp = 0;
+static CVAR_T disable_cvar_if_no_dbghelp = CVAR_T::DISABLED;
 #endif
-static REGISTER_CVAR_INT(
+REGISTER_CVAR_INT(
 	cv_has_stacktrace_dbghelp,
 	has_stacktrace_dbghelp,
 	"0 = not found, 1 = found",
 	CVAR_T::READONLY);
+
+// this exists because of boost spirit, and maybe
+static REGISTER_CVAR_INT(
+	cv_bt_show_inlined_functions,
+	has_stacktrace_dbghelp,
+	"0 = hide, 1 = show (only for dbghelp)",
+	disable_cvar_if_no_dbghelp);
 
 #ifdef USE_WIN32_DEBUG_INFO
 
@@ -27,13 +37,19 @@ static REGISTER_CVAR_INT(
 #include <Windows.h>
 #include <DbgHelp.h>
 
+// this code was based on some apache crashrpt library.
+// but it's modified to an unrecognizable point.
+
 // dbghelp is dynamically loaded, because it should be optional.
 // because cmake wont copy dbghelp for you (does windows install with dbghelp?).
 #define DBGHELP_DLL "dbghelp.dll"
 
-static HMODULE dbghelp_dll = NULL;
+// Why not make every thread have it's own thread_local copy to avoid races / mutexes?
+// I could also avoid a global if I threw this into a class.
+static thread_local HMODULE dbghelp_dll = nullptr;
 
 // public functions in dbghelp.dll
+/*
 typedef BOOL(WINAPI* MINIDUMPWRITEDUMP)(
 	HANDLE hProcess,
 	DWORD ProcessId,
@@ -42,6 +58,7 @@ typedef BOOL(WINAPI* MINIDUMPWRITEDUMP)(
 	CONST PMINIDUMP_EXCEPTION_INFORMATION ExceptionParam,
 	CONST PMINIDUMP_USER_STREAM_INFORMATION UserStreamParam,
 	CONST PMINIDUMP_CALLBACK_INFORMATION CallbackParam);
+	*/
 typedef BOOL(WINAPI* SYMINITIALIZE)(HANDLE hProcess, PSTR UserSearchPath, BOOL fInvadeProcess);
 typedef DWORD(WINAPI* SYMSETOPTIONS)(DWORD SymOptions);
 typedef DWORD(WINAPI* SYMGETOPTIONS)(VOID);
@@ -66,25 +83,128 @@ typedef DWORD(WINAPI* UNDECORATESYMBOLNAME)(
 	PCSTR name, PSTR outputString, DWORD maxStringLength, DWORD flags);
 typedef BOOL (*SYMGETMODULEINFO)(HANDLE hProcess, DWORD64 qwAddr, PIMAGEHLP_MODULE64 ModuleInfo);
 
-// function pointers
-static MINIDUMPWRITEDUMP MiniDumpWriteDump_;
-static SYMINITIALIZE SymInitialize_;
-static SYMSETOPTIONS SymSetOptions_;
-static SYMGETOPTIONS SymGetOptions_;
-static SYMCLEANUP SymCleanup_;
-static SYMGETLINEFROMADDR64 SymGetLineFromAddr64_;
-static SYMFROMADDR SymFromAddr_;
-static STACKWALK64 StackWalk64_;
-static SYMFUNCTIONTABLEACCESS64 SymFunctionTableAccess64_;
-static SYMGETMODULEBASE64 SymGetModuleBase64_;
+typedef DWORD(WINAPI* SYMADDRINCLUDEINLINETRACE)(HANDLE hProcess, DWORD64 Address);
+typedef BOOL(WINAPI* SYMQUERYINLINETRACE)(
+	HANDLE hProcess,
+	DWORD64 StartAddress,
+	DWORD StartContext,
+	DWORD64 StartRetAddress,
+	DWORD64 CurAddress,
+	LPDWORD CurContext,
+	LPDWORD CurFrameIndex);
+typedef BOOL(WINAPI* SYMFROMINLINECONTEXT)(
+	HANDLE hProcess,
+	DWORD64 Address,
+	ULONG InlineContext,
+	PDWORD64 Displacement,
+	PSYMBOL_INFO Symbol);
+typedef BOOL(WINAPI* SYMGETLINEFROMINLINECONTEXT)(
+	HANDLE hProcess,
+	DWORD64 qwAddr,
+	ULONG InlineContext,
+	DWORD64 qwModuleBaseAddress,
+	PDWORD pdwDisplacement,
+	PIMAGEHLP_LINE64 Line64);
 
-static UNDECORATESYMBOLNAME UnDecorateSymbolName_;
-static SYMGETMODULEINFO SymGetModuleInfo_;
+#define DBGHELP_FUNC_MAP(XX)                                 \
+	XX(SymInitialize, SYMINITIALIZE)                         \
+	XX(SymSetOptions, SYMSETOPTIONS)                         \
+	XX(SymGetOptions, SYMGETOPTIONS)                         \
+	XX(SymCleanup, SYMCLEANUP)                               \
+	XX(SymGetLineFromAddr64, SYMGETLINEFROMADDR64)           \
+	XX(SymFromAddr, SYMFROMADDR)                             \
+	XX(StackWalk64, STACKWALK64)                             \
+	XX(SymFunctionTableAccess64, SYMFUNCTIONTABLEACCESS64)   \
+	XX(SymGetModuleBase64, SYMGETMODULEBASE64)               \
+	XX(UnDecorateSymbolName, UNDECORATESYMBOLNAME)           \
+	XX(SymGetModuleInfo, SYMGETMODULEINFO)                   \
+	XX(SymAddrIncludeInlineTrace, SYMADDRINCLUDEINLINETRACE) \
+	XX(SymQueryInlineTrace, SYMQUERYINLINETRACE)             \
+	XX(SymFromInlineContext, SYMFROMINLINECONTEXT)           \
+	XX(SymGetLineFromInlineContext, SYMGETLINEFROMINLINECONTEXT)
+
+// function pointers, add a _ to the end so StackWalk_
+#define XX(name, type) static type name##_;
+DBGHELP_FUNC_MAP(XX)
+#undef XX
+
+// I copied this from
+// https://github.com/rogerorr/articles/blob/main/Debugging_Optimised_Code/SimpleStackWalker.cpp
+__attribute__((no_sanitize("cfi-icall"))) void write_inline_function_detail(
+	HANDLE proc,
+	DWORD64 address,
+	DWORD inline_context,
+	int nr_of_frame,
+	debug_stacktrace_observer& printer)
+{
+	const char* filename = NULL;
+	int lineno = 0;
+	const char* function = NULL;
+	const char* module_name = NULL;
+	char function_buffer[500];
+
+	IMAGEHLP_MODULE moduleInfo;
+	::ZeroMemory(&moduleInfo, sizeof(moduleInfo));
+	moduleInfo.SizeOfStruct = sizeof(moduleInfo);
+
+	// If you want to get the absolute path, using GetModuleNameFromAddress + whereami
+	// getModulePath_ but printing a full path for every line is very noisey.
+	if(SymGetModuleInfo_(proc, address, &moduleInfo) != FALSE)
+	{
+		module_name = moduleInfo.ModuleName;
+	}
+
+	struct
+	{
+		SYMBOL_INFO symInfo;
+		char name[4 * 256];
+	} SymInfo = {{sizeof(SymInfo.symInfo)}, ""};
+
+	PSYMBOL_INFO pSym = &SymInfo.symInfo;
+	pSym->MaxNameLen = sizeof(SymInfo.name);
+
+	DWORD64 uDisplacement(0);
+	if(SymFromInlineContext_(proc, address, inline_context, &uDisplacement, pSym) != 0)
+	{
+		function = pSym->Name;
+		LONG_PTR displacement = static_cast<LONG_PTR>(uDisplacement);
+		if(snprintf(
+			   function_buffer,
+			   sizeof(function_buffer),
+			   "(inline) %s%+lld (0x%llx)",
+			   function,
+			   displacement,
+			   address) >= 0)
+		{
+			function = function_buffer;
+		}
+	}
+
+	// file/line number
+	IMAGEHLP_LINE64 lineInfo = {sizeof(lineInfo)};
+	// I don't know what's the deal with 2 displacements...
+	// MAYBE this is the relative displacement,
+	// while the above is the displacement from the function.
+	DWORD dwDisplacement(0);
+	if(SymGetLineFromInlineContext_(proc, address, inline_context, 0, &dwDisplacement, &lineInfo) != 0)
+	{
+		filename = lineInfo.FileName;
+		if(cv_bt_full_paths.data() == 0)
+		{
+			filename = remove_file_path(lineInfo.FileName);
+		}
+		lineno = lineInfo.LineNumber; // NOLINT(*-narrowing-conversions)
+	}
+
+	debug_stacktrace_info info{nr_of_frame + 1, address, module_name, function, filename, lineno};
+
+	// TODO: handle errors?
+	printer.print_line(&info);
+}
 
 // Write the details of one function to the log file
-__attribute__((no_sanitize("cfi-icall")))
-static void
-	write_function_detail(DWORD64 stack_frame, int nr_of_frame, debug_stacktrace_observer& printer)
+__attribute__((no_sanitize("cfi-icall"))) static void
+	write_function_detail(DWORD64 address, int nr_of_frame, debug_stacktrace_observer& printer)
 {
 	const char* filename = NULL;
 	int lineno = 0;
@@ -100,7 +220,7 @@ static void
 
 	// If you want to get the absolute path, using GetModuleNameFromAddress + whereami
 	// getModulePath_ but printing a full path for every line is very noisey.
-	if(SymGetModuleInfo_(proc, stack_frame, &moduleInfo) != FALSE)
+	if(SymGetModuleInfo_(proc, address, &moduleInfo) != FALSE)
 	{
 		module_name = moduleInfo.ModuleName;
 	}
@@ -113,7 +233,7 @@ static void
 	// log the function name
 	pIHS->SizeOfStruct = sizeof(SYMBOL_INFO);
 	pIHS->MaxNameLen = MAX_SYM_NAME;
-	if(SymFromAddr_(proc, stack_frame, &func_disp, pIHS) != FALSE)
+	if(SymFromAddr_(proc, address, &func_disp, pIHS) != FALSE)
 	{
 		// the name is already undecorated from dbghelp due to SYMOPT_UNDNAME
 		function = pIHS->Name;
@@ -130,7 +250,7 @@ static void
 				   "(bad symbol) %s+%llu (0x%llx)",
 				   function,
 				   func_disp,
-				   stack_frame) >= 0)
+				   address) >= 0)
 			{
 				function = function_buffer;
 			}
@@ -167,27 +287,29 @@ static void
 
 	// find the source line for this function.
 	ih_line.SizeOfStruct = sizeof(IMAGEHLP_LINE);
-	if(SymGetLineFromAddr64_(proc, stack_frame, &line_disp, &ih_line) != FALSE)
+	if(SymGetLineFromAddr64_(proc, address, &line_disp, &ih_line) != FALSE)
 	{
-		filename = remove_file_path(ih_line.FileName);
+		filename = ih_line.FileName;
+		if(cv_bt_full_paths.data() == 0)
+		{
+			filename = remove_file_path(filename);
+		}
 		lineno = ih_line.LineNumber;
 	}
 
-	debug_stacktrace_info info{
-		nr_of_frame + 1, stack_frame, module_name, function, filename, lineno};
+	debug_stacktrace_info info{nr_of_frame + 1, address, module_name, function, filename, lineno};
 
 	// TODO: handle errors?
-	bool ret = printer.print_line(&info);
+	printer.print_line(&info);
 }
 
 // Walk over the stack and log all relevant information to the log file
-__attribute__((no_sanitize("cfi-icall")))
-static void write_stacktrace(CONTEXT* context, debug_stacktrace_observer& printer, int skip = 0)
+__attribute__((no_sanitize("cfi-icall"))) static void
+	write_stacktrace(CONTEXT* context, debug_stacktrace_observer& printer, int skip = 0)
 {
 	HANDLE proc = GetCurrentProcess();
 	STACKFRAME64 stack_frame;
 	DWORD machine;
-	int i = 0;
 
 	// Write the stack trace
 	ZeroMemory(&stack_frame, sizeof(STACKFRAME64));
@@ -209,22 +331,59 @@ static void write_stacktrace(CONTEXT* context, debug_stacktrace_observer& printe
 #error Unknown processortype, please disable USE_WIN32_DEBUG_INFO
 #endif
 
-	int trimmed_frame_start = 0;
-	// convert the address to the same type (DWORD64)
+	int trimmed_frame_start = -1;
+	bool print_once = false;
 	uintptr_t address_copy;
-	memcpy(&address_copy, &g_trim_return_address, sizeof(address_copy));
-
-	for(;;)
-	{
-		if(i > cv_bt_max_depth.data())
+	memcpy(&address_copy, &g_trim_return_address, sizeof(address_copy)); // NOLINT(*-multi-level-implicit-pointer-conversion)
+	auto if_skip = [&](int index, DWORD64 pc) -> bool {
+		// >= because this is before I increment.
+		if(index >= cv_bt_max_depth.data() + skip)
 		{
-			printer.print_string_fmt(
-				"max depth reached (%s = %d)\n",
-				cv_bt_max_depth.cvar_key,
-				cv_bt_max_depth.data());
-			break;
+			return true;
 		}
-		if(!StackWalk64_(
+
+		// the +1 is to skip THIS function frame.
+		if(cv_bt_ignore_skip.data() == 0 && index < skip)
+		{
+			return true;
+		}
+
+		// check if this shuold be trimmed.
+		if(cv_bt_trim_stacktrace.data() != 0 && g_trim_return_address != nullptr)
+		{
+			if(address_copy == pc)
+			{
+				if(trimmed_frame_start != -1)
+				{
+					printer.print_string_fmt("info: trim function found again at: %d\n", index);
+				}
+				else
+				{
+					// I start trimming 1 frame below the target.
+					trimmed_frame_start = index + 1 - skip;
+				}
+				// don't trim THIS line.
+				return false;
+			}
+			// below the trim, I don't trim it because it might be weird (setjmp/longjmp?).
+			if(trimmed_frame_start == -1 && !print_once && address_copy < stack_frame.AddrPC.Offset)
+			{
+				print_once = true;
+				printer.print_string("(trim found incorrectly)\n");
+			}
+		}
+
+		if(trimmed_frame_start != -1 && index >= trimmed_frame_start)
+		{
+			return true;
+		}
+		return false;
+	};
+
+	int i = 0;
+	for(; i < cv_bt_max_depth.data() + skip;)
+	{
+		if(StackWalk64_(
 			   machine,
 			   proc,
 			   GetCurrentThread(),
@@ -233,127 +392,116 @@ static void write_stacktrace(CONTEXT* context, debug_stacktrace_observer& printe
 			   NULL,
 			   SymFunctionTableAccess64_,
 			   SymGetModuleBase64_,
-			   NULL))
+			   NULL) == FALSE)
 		{
 			break;
 		}
+
 		// Sometimes StackWalk returns TRUE with a frame of zero at the end.
 		if(stack_frame.AddrPC.Offset == 0)
 		{
 			break;
 		}
 
-		if(i >= skip || cv_bt_ignore_skip.data() == 1)
+		DWORD64 pc = stack_frame.AddrPC.Offset;
+
+		if(!if_skip(i, pc))
 		{
 			write_function_detail(stack_frame.AddrPC.Offset, i - skip, printer);
 		}
+		++i;
 
-		if(cv_bt_trim_stacktrace.data() != 0 && g_trim_return_address != nullptr)
+		if(cv_bt_show_inlined_functions.data() == 0)
 		{
-			if(address_copy == stack_frame.AddrPC.Offset)
+			continue;
+		}
+
+		// Expand any inline frames
+		DWORD inline_count = SymAddrIncludeInlineTrace_(proc, pc);
+		if(inline_count > 0)
+		{
+			DWORD inline_context(0), frameIndex(0);
+			if(SymQueryInlineTrace_(proc, pc, 0, pc, pc, &inline_context, &frameIndex))
 			{
-				if(trimmed_frame_start != 0)
+				for(DWORD frame = 0; frame < inline_count; frame++, inline_context++)
 				{
-					printer.print_string_fmt("info: trim function found again at: %d\n", i);
-				}
-				else
-				{
-					// I start trimming 1 frame below the target.
-					trimmed_frame_start = i + 1;
-					skip = 999;
+					if(!if_skip(i, pc))
+					{
+						write_inline_function_detail(proc, pc, inline_context, i - skip, printer);
+						// showInlineVariablesAt(os, stackFrame, *context, inline_context)
+					}
+					++i;
 				}
 			}
 		}
-
-
-		i++;
 	}
-	if(cv_bt_trim_stacktrace.data() != 0 && g_trim_return_address != nullptr)
-	{
-		trim_stacktrace_print_helper(
-			printer, trimmed_frame_start == 0 ? -1 : (i - trimmed_frame_start));
-	}
+	trim_stacktrace_print_helper(printer, trimmed_frame_start, i - skip);
 }
 
 // Load the dbghelp.dll file, try to find a version that matches our requirements.
-__attribute__((no_sanitize("cfi-icall")))
-static BOOL load_dbghelp_dll()
+__attribute__((no_sanitize("cfi-icall"))) static bool
+	load_dbghelp_dll(debug_stacktrace_observer& printer)
 {
-	dbghelp_dll = (HMODULE)LoadLibrary(DBGHELP_DLL);
-	if(dbghelp_dll != NULL)
+	dbghelp_dll = LoadLibrary(DBGHELP_DLL);
+	if(dbghelp_dll == NULL)
 	{
-
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
-#endif
-		DWORD opts;
-		// load the functions
-		MiniDumpWriteDump_ = (MINIDUMPWRITEDUMP)GetProcAddress(dbghelp_dll, "MiniDumpWriteDump");
-		SymInitialize_ = (SYMINITIALIZE)GetProcAddress(dbghelp_dll, "SymInitialize");
-		SymSetOptions_ = (SYMSETOPTIONS)GetProcAddress(dbghelp_dll, "SymSetOptions");
-		SymGetOptions_ = (SYMGETOPTIONS)GetProcAddress(dbghelp_dll, "SymGetOptions");
-		SymCleanup_ = (SYMCLEANUP)GetProcAddress(dbghelp_dll, "SymCleanup");
-		SymGetLineFromAddr64_ =
-			(SYMGETLINEFROMADDR64)GetProcAddress(dbghelp_dll, "SymGetLineFromAddr64");
-		SymFromAddr_ = (SYMFROMADDR)GetProcAddress(dbghelp_dll, "SymFromAddr");
-		StackWalk64_ = (STACKWALK64)GetProcAddress(dbghelp_dll, "StackWalk64");
-		SymFunctionTableAccess64_ =
-			(SYMFUNCTIONTABLEACCESS64)GetProcAddress(dbghelp_dll, "SymFunctionTableAccess64");
-		SymGetModuleBase64_ = (SYMGETMODULEBASE64)GetProcAddress(dbghelp_dll, "SymGetModuleBase64");
-
-		UnDecorateSymbolName_ =
-			(UNDECORATESYMBOLNAME)GetProcAddress(dbghelp_dll, "UnDecorateSymbolName");
-		SymGetModuleInfo_ = (SYMGETMODULEINFO)GetProcAddress(dbghelp_dll, "SymGetModuleInfo");
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-
-		if(!(MiniDumpWriteDump_ && SymInitialize_ && SymSetOptions_ && SymGetOptions_ &&
-			 SymCleanup_ && SymGetLineFromAddr64_ && SymFromAddr_ && SymGetModuleBase64_ &&
-			 StackWalk64_ && SymFunctionTableAccess64_ && UnDecorateSymbolName_ &&
-			 SymGetModuleInfo_))
-			goto cleanup;
-
-		// initialize the symbol loading code
-		opts = SymGetOptions_();
-
-		opts |= SYMOPT_LOAD_LINES;
-		opts |= SYMOPT_DEFERRED_LOADS;
-
-		// turning mangling off has no effect because the symbols are stored unmangled
-		// only public symbols are affected (i don't know what that means).
-		if(cv_bt_demangle.data() == 0)
-		{
-			opts &= ~SYMOPT_UNDNAME;
-		}
-
-		// Set the 'load lines' option to retrieve line number information;
-		//   set the Deferred Loads option to map the debug info in memory only
-		//   when needed.
-		SymSetOptions_(opts);
-
-		// Initialize the debughlp DLL with the default path and automatic
-		//   module enumeration (and loading of symbol tables) for this process.
-
-		SymInitialize_(GetCurrentProcess(), NULL, TRUE);
-
-		return TRUE;
+		printer.print_string_fmt(
+			"failed to load %s: %s\n", DBGHELP_DLL, WIN_GetFormattedGLE().c_str());
+		return false;
 	}
+#define XX(name, type)                                                                           \
+	name##_ = (type)GetProcAddress(dbghelp_dll, #name);                                          \
+	if(name##_ == nullptr)                                                                       \
+	{                                                                                            \
+		printer.print_string_fmt(                                                                \
+			"failed to load %s in %s: %s\n", #name, DBGHELP_DLL, WIN_GetFormattedGLE().c_str()); \
+		goto cleanup;                                                                            \
+	}
+	DBGHELP_FUNC_MAP(XX)
+#undef XX
+	DWORD opts;
+	// initialize the symbol loading code
+	opts = SymGetOptions_();
+
+	opts |= SYMOPT_LOAD_LINES;
+	opts |= SYMOPT_DEFERRED_LOADS;
+	opts |= SYMOPT_OMAP_FIND_NEAREST;
+
+	// turning mangling off has no effect because the symbols are stored unmangled
+	// only public symbols are affected (i don't know what that means).
+	if(cv_bt_demangle.data() == 0)
+	{
+		opts &= ~SYMOPT_UNDNAME;
+	}
+
+	// Set the 'load lines' option to retrieve line number information;
+	//   set the Deferred Loads option to map the debug info in memory only
+	//   when needed.
+	SymSetOptions_(opts);
+
+	// Initialize the debughlp DLL with the default path and automatic
+	//   module enumeration (and loading of symbol tables) for this process.
+
+	SymInitialize_(GetCurrentProcess(), NULL, TRUE);
+
+	return true;
 
 cleanup:
 	if(dbghelp_dll) FreeLibrary(dbghelp_dll);
 
-	return FALSE;
+	return false;
 }
 
 // Cleanup the dbghelp.dll library
-__attribute__((no_sanitize("cfi-icall")))
-static void cleanup_debughlp()
+__attribute__((no_sanitize("cfi-icall"))) static void cleanup_debughlp()
 {
 	SymCleanup_(GetCurrentProcess());
 
 	FreeLibrary(dbghelp_dll);
+
+#define XX(name, type) name##_ = nullptr;
+	DBGHELP_FUNC_MAP(XX)
+#undef XX
 
 	dbghelp_dll = NULL;
 }
@@ -375,14 +523,12 @@ __declspec(noinline) bool
 	if(ctx == NULL)
 	{
 		// I can't use serr due to recursion.
-		fprintf(stderr, "<stderr> %s: ctx null\n", __func__);
+		printer.print_string_fmt("%s: ctx null\n", __func__);
 		return false;
 	}
 
-	if(!load_dbghelp_dll())
+	if(!load_dbghelp_dll(printer))
 	{
-		// TODO: should probably go through all the functions and use getlasterror
-		fprintf(stderr, "<stderr> %s: failed to load dbghelp\n", __func__);
 		return false;
 	}
 
@@ -396,13 +542,28 @@ __declspec(noinline) bool
 
 bool debug_win32_write_function_detail(uintptr_t stack_frame, debug_stacktrace_observer& printer)
 {
-	if(!load_dbghelp_dll())
+	if(!load_dbghelp_dll(printer))
 	{
-		// TODO: should probably go through all the functions and use getlasterror
-		fprintf(stderr, "<stderr> %s: failed to load dbghelp\n", __func__);
 		return false;
 	}
 	write_function_detail(stack_frame, 0, printer);
+	if(cv_bt_show_inlined_functions.data() != 0)
+	{
+		HANDLE proc = GetCurrentProcess();
+		DWORD inline_count = SymAddrIncludeInlineTrace_(proc, stack_frame);
+		if(inline_count > 0)
+		{
+			DWORD inline_context(0), frameIndex(0);
+			if(SymQueryInlineTrace_(proc, stack_frame, 0, stack_frame, stack_frame, &inline_context, &frameIndex))
+			{
+				for(DWORD frame = 0; frame < inline_count; frame++, inline_context++)
+				{
+					write_inline_function_detail(proc, stack_frame, inline_context, frame + 1, printer);
+					// showInlineVariablesAt(os, stackFrame, *context, inline_context)
+				}
+			}
+		}
+	}
 	cleanup_debughlp();
 	return true;
 }

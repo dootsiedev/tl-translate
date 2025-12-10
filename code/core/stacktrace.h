@@ -10,6 +10,8 @@ extern cvar_int cv_bt_full_paths;
 extern cvar_int cv_bt_max_depth;
 extern cvar_int cv_bt_ignore_skip;
 extern cvar_int cv_bt_trim_stacktrace;
+extern cvar_int cv_has_stacktrace_libbacktrace;
+extern cvar_int cv_has_stacktrace_dbghelp;
 
 #if defined(__EMSCRIPTEN__)
 
@@ -81,7 +83,8 @@ class debug_stacktrace_observer
 public:
 	virtual bool print_line(debug_stacktrace_info* data) = 0;
 	virtual void print_string(const char* message) = 0;
-	virtual void print_string_fmt(MY_MSVC_PRINTF const char* fmt, ...) __attribute__((format(printf, 2, 3))) = 0;
+	virtual void print_string_fmt(MY_MSVC_PRINTF const char* fmt, ...)
+		__attribute__((format(printf, 2, 3))) = 0;
 	// not used but needed to avoid warnings.
 	virtual ~debug_stacktrace_observer() = default;
 };
@@ -111,17 +114,18 @@ MY_NOINLINE bool debug_stacktrace(debug_stacktrace_observer& printer, int skip =
 bool debug_write_function_info(debug_stacktrace_observer& printer, void* address);
 
 // <stacktrace> C++23
-#ifndef __cpp_lib_stacktrace
-#define __cpp_lib_stacktrace 0
-#endif
 // I am too lazy to replace __cpp_lib_stacktrace with USE_CPP_STACKTRACE
 // I just undef it.
 #ifndef USE_CPP_STACKTRACE
-#if __cpp_lib_stacktrace
+#if defined(__cpp_lib_stacktrace) && __cpp_lib_stacktrace
 #undef __cpp_lib_stacktrace
+#endif
+#endif
+
+#ifndef __cpp_lib_stacktrace
 #define __cpp_lib_stacktrace 0
 #endif
-#endif
+
 #if __cpp_lib_stacktrace && !defined(HAS_STACKTRACE_PROBABLY)
 // Disable C++23 stacktrace if I am using CFI sanitizer.
 #ifdef MY_FIX_CFI_ICALL
@@ -165,15 +169,23 @@ NDSERR bool
 #endif
 
 __attribute__((noinline)) bool
-	write_libbacktrace_stacktrace(debug_stacktrace_cb_type printer, int skip);
+	write_libbacktrace_stacktrace(debug_stacktrace_observer& printer, int skip);
+#ifdef __MINGW32__
+__attribute__((noinline)) bool
+	write_libbacktrace_mingw_stacktrace(debug_stacktrace_observer& printer, int skip);
+#endif
+__attribute__((noinline)) bool
+	write_libbacktrace_function_detail(uintptr_t stack_frame, debug_stacktrace_observer& printer);
 #endif
 
 #ifdef HAS_STACKTRACE_PROBABLY
 
-extern thread_local void* g_trim_return_address;
-
+// internal use only.
 // returns false if snprintf failed, serr is not written.
-void trim_stacktrace_print_helper(debug_stacktrace_observer& printer, int trim_count);
+void trim_stacktrace_print_helper(
+	debug_stacktrace_observer& printer, int trim_start, int total_frames);
+
+extern thread_local void* g_trim_return_address;
 
 // get the address of the current function using the return address.
 // I could get the address of the function directly (explicitly) but I worry about inlining.
@@ -200,7 +212,6 @@ void trim_stacktrace_print_helper(debug_stacktrace_observer& printer, int trim_c
 #ifndef TRIM_STACKTRACE_END
 #define TRIM_STACKTRACE_END
 #endif
-
 
 struct trim_stacktrace_end_raii
 {

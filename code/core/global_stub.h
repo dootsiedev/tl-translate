@@ -6,6 +6,10 @@
 #include <cassert>
 #include <cstdio>
 
+#ifndef NDSERR
+#define NDSERR [[nodiscard]]
+#endif
+
 #ifndef serr
 #define serr(msg)           \
 	do                      \

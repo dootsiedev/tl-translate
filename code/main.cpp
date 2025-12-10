@@ -8,22 +8,48 @@
 
 #include "core/asan_helper.h"
 
-#ifdef WIN_UNICODE_HACK
+#ifdef _WIN32
+
+// for SetConsoleOutputCP
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#ifdef ERROR
+#undef ERROR
+#endif
+
+// for cv_win_unicode_hack
 #include <fcntl.h>
 #include <io.h>
 #include <stdio.h>
+
+//defined in global.cpp (I really should put this into a header...)
+extern cvar_int cv_win_unicode_hack;
+extern bool g_win_unicode_trigger;
 #endif
+
 int main(int argc, char** argv)
 {
 #ifdef MY_HAS_ASAN
 	init_asan();
 #endif
 
-#ifdef WIN_UNICODE_HACK
-	_setmode(_fileno(stdout), _O_U8TEXT);
-#endif
+	switch(load_cvar(argc, argv))
+	{
+	case CVAR_LOAD::SUCCESS: break;
+	case CVAR_LOAD::ERROR: show_error("cvar error", serr_get_error().c_str()); return 1;
+	case CVAR_LOAD::CLOSE: return 0;
+	}
 
-	#if 0 //def _WIN32
+#ifdef _WIN32
+	if(cv_win_unicode_hack.data() == 1)
+	{
+		g_win_unicode_trigger = true;
+		_setmode(_fileno(stdout), _O_U8TEXT);
+	}
+	if(cv_win_unicode_hack.data() == 2)
+	{
 		// With conemu, I get an address sanitizer error UNLESS I check GetACP
 		// it points to <unknown module> at address 0
 		// you can just enable the Beta: Use Unicode UTF-8 for worldwide language support
@@ -35,14 +61,8 @@ int main(int argc, char** argv)
 				"SetConsoleOutputCP(CP_UTF8) error: %s\n",
 				WIN_GetFormattedGLE(GetLastError()).c_str());
 		}
-	#endif
-
-	switch(load_cvar(argc, argv))
-	{
-	case CVAR_LOAD::SUCCESS: break;
-	case CVAR_LOAD::ERROR: show_error("cvar error", serr_get_error().c_str()); return 1;
-	case CVAR_LOAD::CLOSE: return 0;
 	}
+#endif
 
 	if(!get_translation_context().init())
 	{

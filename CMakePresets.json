@@ -9,14 +9,13 @@
       "cacheVariables": {
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/../${sourceDirName}-${presetName}-install",
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
-        "USE_CPP23": false,
+        "USE_CPP23": true,
         "USE_CPP_STACKTRACE": false,
         "USE_WIN32_DEBUG_INFO": false,
         "TL_COMPILE_TIME_TRANSLATION": false,
         "TL_COMPILE_TIME_ASSERTS": true,
         "BUILD_TESTS": true,
         "ENABLE_AI": true,
-        "WIN_UNICODE_HACK": true,
         "AI_PYTHON_DIR": "${sourceDir}/../python_venv",
         "AI_CACHE_DIR": "${sourceDir}/../hf_cache"
       }
@@ -88,7 +87,8 @@
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++"
+        "CMAKE_CXX_COMPILER": "clang++",
+        "USE_WIN32_DEBUG_INFO": true
       },
       "condition": {
         "type": "equals",
@@ -142,6 +142,58 @@
         "USE_LTO": true,
         "USE_CFI": true,
         "USE_SIMPLE_HARDEN": true
+      }
+    },
+    {
+      "name": "llvm-mingw",
+      "description": "clang libc++ libunwind dwarf, using msys2",
+      "hidden": true,
+      "inherits": "default",
+      "generator": "MinGW Makefiles",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "C:/msys64/clang64/bin/clang.exe",
+        "CMAKE_CXX_COMPILER": "C:/msys64/clang64/bin/clang++.exe",
+        "CMAKE_MAKE_PROGRAM": "C:/msys64/clang64/bin/mingw32-make.exe",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",
+        "CMAKE_TOOLCHAIN_FILE": "$env{MY_VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "USE_WIN32_DEBUG_INFO": true,
+        "USE_LIBBACKTRACE": true,
+        "USE_MINGW_PDB": true
+      }
+    },
+    {
+      "name": "llvm-mingw-release",
+      "description": "release",
+      "inherits": "llvm-mingw",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "USE_WIN32_DEBUG_INFO": false,
+        "USE_LIBBACKTRACE": false
+      }
+    },
+    {
+      "name": "llvm-mingw-debug-san",
+      "description": "debug with asan and ubsan",
+      "inherits": "llvm-mingw",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "USE_ASAN": true,
+        "USE_UBSAN": true
+      }
+    },
+    {
+      "name": "llvm-mingw-release-cfi",
+      "description": "release with debug info with hardening",
+      "inherits": "llvm-mingw",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "USE_LTO": false,
+        "USE_CFI": false,
+        "USE_SIMPLE_HARDEN": false,
+        "USE_STACK_PROTECTOR": true,
+        "USE_CET": true,
+        "USE_UBSAN": false,
+        "USE_UBSAN_TRAP": true
       }
     },
     {
