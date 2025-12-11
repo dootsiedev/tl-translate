@@ -44,9 +44,6 @@ static REGISTER_CVAR_INT(
 // because cmake wont copy dbghelp for you (does windows install with dbghelp?).
 #define DBGHELP_DLL "dbghelp.dll"
 
-// Why not make every thread have it's own thread_local copy to avoid races / mutexes?
-// I could also avoid a global if I threw this into a class.
-static thread_local HMODULE dbghelp_dll = nullptr;
 
 // public functions in dbghelp.dll
 /*
@@ -123,13 +120,19 @@ typedef BOOL(WINAPI* SYMGETLINEFROMINLINECONTEXT)(
 	XX(SymFromInlineContext, SYMFROMINLINECONTEXT)           \
 	XX(SymGetLineFromInlineContext, SYMGETLINEFROMINLINECONTEXT)
 
-// function pointers, add a _ to the end so StackWalk_
-#define XX(name, type) static type name##_;
-DBGHELP_FUNC_MAP(XX)
-#undef XX
+struct DBGHELP_CONTEXT
+{
 
-// I copied this from
-// https://github.com/rogerorr/articles/blob/main/Debugging_Optimised_Code/SimpleStackWalker.cpp
+	HMODULE dbghelp_dll;
+	// function pointers, add a _ to the end so StackWalk_
+#define XX(name, type) type name##_;
+	DBGHELP_FUNC_MAP(XX)
+	#undef XX
+};
+
+static thread_local DBGHELP_CONTEXT dbg_ctx;
+
+// I could probably use a callback to merge the inline and non-inline function...
 __attribute__((no_sanitize("cfi-icall"))) void write_inline_function_detail(
 	HANDLE proc,
 	DWORD64 address,
@@ -146,12 +149,25 @@ __attribute__((no_sanitize("cfi-icall"))) void write_inline_function_detail(
 	IMAGEHLP_MODULE moduleInfo;
 	::ZeroMemory(&moduleInfo, sizeof(moduleInfo));
 	moduleInfo.SizeOfStruct = sizeof(moduleInfo);
-
-	// If you want to get the absolute path, using GetModuleNameFromAddress + whereami
-	// getModulePath_ but printing a full path for every line is very noisey.
-	if(SymGetModuleInfo_(proc, address, &moduleInfo) != FALSE)
+	std::unique_ptr<char[]> module_path;
+	// gets the fuller path, I should replace dbghelp, but I assume this is slower.
+	if(cv_bt_full_paths.data() != 0)
 	{
-		module_name = moduleInfo.ModuleName;
+		// NOLINTNEXTLINE(*-no-int-to-ptr)
+		int length = WIN32_getModulePath(reinterpret_cast<void*>(address), nullptr, 0, nullptr);
+		module_path = std::make_unique<char[]>(length + 1);
+		// NOLINTNEXTLINE(*-no-int-to-ptr)
+		if(WIN32_getModulePath(reinterpret_cast<void*>(address), module_path.get(), length, nullptr) == length)
+		{
+			module_name = module_path.get();
+		}
+	}
+	else
+	{
+		if(dbg_ctx.SymGetModuleInfo_(proc, address, &moduleInfo) != FALSE)
+		{
+			module_name = moduleInfo.ModuleName;
+		}
 	}
 
 	struct
@@ -163,8 +179,10 @@ __attribute__((no_sanitize("cfi-icall"))) void write_inline_function_detail(
 	PSYMBOL_INFO pSym = &SymInfo.symInfo;
 	pSym->MaxNameLen = sizeof(SymInfo.name);
 
+	// I copied this from
+	// https://github.com/rogerorr/articles/blob/main/Debugging_Optimised_Code/SimpleStackWalker.cpp
 	DWORD64 uDisplacement(0);
-	if(SymFromInlineContext_(proc, address, inline_context, &uDisplacement, pSym) != 0)
+	if(dbg_ctx.SymFromInlineContext_(proc, address, inline_context, &uDisplacement, pSym) != 0)
 	{
 		function = pSym->Name;
 		LONG_PTR displacement = static_cast<LONG_PTR>(uDisplacement);
@@ -186,7 +204,8 @@ __attribute__((no_sanitize("cfi-icall"))) void write_inline_function_detail(
 	// MAYBE this is the relative displacement,
 	// while the above is the displacement from the function.
 	DWORD dwDisplacement(0);
-	if(SymGetLineFromInlineContext_(proc, address, inline_context, 0, &dwDisplacement, &lineInfo) != 0)
+	if(dbg_ctx.SymGetLineFromInlineContext_(proc, address, inline_context, 0, &dwDisplacement, &lineInfo) !=
+	   0)
 	{
 		filename = lineInfo.FileName;
 		if(cv_bt_full_paths.data() == 0)
@@ -202,6 +221,12 @@ __attribute__((no_sanitize("cfi-icall"))) void write_inline_function_detail(
 	printer.print_line(&info);
 }
 
+// mingw but built with -gcodeview + -Wl,--pdb=
+// But it's an optimized build.
+// Normally the pdb file should have source + line info which avoids the itanium ABI mangling (somehow)
+#ifdef __GNUG__
+#include <cxxabi.h>
+#endif
 // Write the details of one function to the log file
 __attribute__((no_sanitize("cfi-icall"))) static void
 	write_function_detail(DWORD64 address, int nr_of_frame, debug_stacktrace_observer& printer)
@@ -214,15 +239,34 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 
 	HANDLE proc = GetCurrentProcess();
 
+#ifdef __GNUG__
+	auto free_del = [](void* ptr) { free(ptr); };
+	std::unique_ptr<char, decltype(free_del)> demangler{NULL, free_del};
+#endif
+
 	IMAGEHLP_MODULE moduleInfo;
 	::ZeroMemory(&moduleInfo, sizeof(moduleInfo));
 	moduleInfo.SizeOfStruct = sizeof(moduleInfo);
 
-	// If you want to get the absolute path, using GetModuleNameFromAddress + whereami
-	// getModulePath_ but printing a full path for every line is very noisey.
-	if(SymGetModuleInfo_(proc, address, &moduleInfo) != FALSE)
+	// gets the fuller path, I should replace dbghelp, but I assume this is slower.
+	std::unique_ptr<char[]> module_path;
+	if(cv_bt_full_paths.data() != 0)
 	{
-		module_name = moduleInfo.ModuleName;
+		// NOLINTNEXTLINE(*-no-int-to-ptr)
+		int length = WIN32_getModulePath(reinterpret_cast<void*>(address), nullptr, 0, nullptr);
+		module_path = std::make_unique<char[]>(length + 1);
+		// NOLINTNEXTLINE(*-no-int-to-ptr)
+		if(WIN32_getModulePath(reinterpret_cast<void*>(address), module_path.get(), length, nullptr) == length)
+		{
+			module_name = module_path.get();
+		}
+	}
+	else
+	{
+		if(dbg_ctx.SymGetModuleInfo_(proc, address, &moduleInfo) != FALSE)
+		{
+			module_name = moduleInfo.ModuleName;
+		}
 	}
 
 	ULONG64
@@ -233,10 +277,39 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 	// log the function name
 	pIHS->SizeOfStruct = sizeof(SYMBOL_INFO);
 	pIHS->MaxNameLen = MAX_SYM_NAME;
-	if(SymFromAddr_(proc, address, &func_disp, pIHS) != FALSE)
+	if(dbg_ctx.SymFromAddr_(proc, address, &func_disp, pIHS) != FALSE)
 	{
 		// the name is already undecorated from dbghelp due to SYMOPT_UNDNAME
 		function = pIHS->Name;
+
+#ifdef __GNUG__
+		if(cv_bt_demangle.data() != 0 && function != NULL)
+		{
+			int status = 0;
+			// I need to add an underscore.
+			std::string temp = "_";
+			temp += function;
+			demangler.reset(abi::__cxa_demangle(temp.c_str(), NULL, NULL, &status));
+			switch(status)
+			{
+			case 0: function = demangler.get(); break;
+			case -1:
+				printer.print_string(
+					"abi::__cxa_demangle(-1): A memory allocation failure occurred.\n");
+				break;
+			case -2:
+				// this is spammy.
+				// payload->printer->print_string(
+				//	"abi::__cxa_demangle(-2): mangled_name is not a valid name under the C++ ABI
+				// mangling rules.\n");
+				break;
+			case -3:
+				printer.print_string("abi::__cxa_demangle(-3_: One of the arguments is invalid.\n");
+				break;
+			default: printer.print_string_fmt("abi::__cxa_demangle(%d): unknown status.\n", status);
+			}
+		}
+#endif
 
 		// the displacement says that this is probably a bogus private function,
 		// unless you have internal symbols (not relying only on exports)
@@ -255,7 +328,6 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 				function = function_buffer;
 			}
 		}
-
 		else
 		{
 			// I could also check (pIHS->Flags & SYMFLAG_EXPORT)
@@ -270,6 +342,7 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 				}
 			}
 		}
+
 
 		/*char undecorate_buffer[500];//=_T("?");
 
@@ -287,7 +360,7 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 
 	// find the source line for this function.
 	ih_line.SizeOfStruct = sizeof(IMAGEHLP_LINE);
-	if(SymGetLineFromAddr64_(proc, address, &line_disp, &ih_line) != FALSE)
+	if(dbg_ctx.SymGetLineFromAddr64_(proc, address, &line_disp, &ih_line) != FALSE)
 	{
 		filename = ih_line.FileName;
 		if(cv_bt_full_paths.data() == 0)
@@ -333,8 +406,7 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 
 	int trimmed_frame_start = -1;
 	bool print_once = false;
-	uintptr_t address_copy;
-	memcpy(&address_copy, &g_trim_return_address, sizeof(address_copy)); // NOLINT(*-multi-level-implicit-pointer-conversion)
+	uintptr_t address_copy = reinterpret_cast<uintptr_t>(g_trim_return_address);
 	auto if_skip = [&](int index, DWORD64 pc) -> bool {
 		// >= because this is before I increment.
 		if(index >= cv_bt_max_depth.data() + skip)
@@ -353,11 +425,14 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 		{
 			if(address_copy == pc)
 			{
+#ifndef __OPTIMIZE__
+				// I need to handle inlined functions...
 				if(trimmed_frame_start != -1)
 				{
 					printer.print_string_fmt("info: trim function found again at: %d\n", index);
 				}
 				else
+#endif
 				{
 					// I start trimming 1 frame below the target.
 					trimmed_frame_start = index + 1 - skip;
@@ -381,27 +456,36 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 	};
 
 	int i = 0;
-	for(; i < cv_bt_max_depth.data() + skip;)
+	while(true)
 	{
-		if(StackWalk64_(
+		if(dbg_ctx.StackWalk64_(
 			   machine,
 			   proc,
 			   GetCurrentThread(),
 			   &stack_frame,
 			   context,
 			   NULL,
-			   SymFunctionTableAccess64_,
-			   SymGetModuleBase64_,
+			   dbg_ctx.SymFunctionTableAccess64_,
+			   dbg_ctx.SymGetModuleBase64_,
 			   NULL) == FALSE)
 		{
 			break;
 		}
 
-		// Sometimes StackWalk returns TRUE with a frame of zero at the end.
+		// StackWalk returns TRUE with a frame of zero at the end.
 		if(stack_frame.AddrPC.Offset == 0)
 		{
 			break;
 		}
+
+		// this does one more stackwalk, so that I can detect if there is a missing entry.
+		// in case cv_bt_max_depth.data() == the size of the stacktrace.
+		if(i >= cv_bt_max_depth.data() + skip)
+		{
+			++i;
+			break;
+		}
+
 
 		DWORD64 pc = stack_frame.AddrPC.Offset;
 
@@ -417,11 +501,11 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 		}
 
 		// Expand any inline frames
-		DWORD inline_count = SymAddrIncludeInlineTrace_(proc, pc);
+		DWORD inline_count = dbg_ctx.SymAddrIncludeInlineTrace_(proc, pc);
 		if(inline_count > 0)
 		{
 			DWORD inline_context(0), frameIndex(0);
-			if(SymQueryInlineTrace_(proc, pc, 0, pc, pc, &inline_context, &frameIndex))
+			if(dbg_ctx.SymQueryInlineTrace_(proc, pc, 0, pc, pc, &inline_context, &frameIndex))
 			{
 				for(DWORD frame = 0; frame < inline_count; frame++, inline_context++)
 				{
@@ -442,16 +526,21 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 __attribute__((no_sanitize("cfi-icall"))) static bool
 	load_dbghelp_dll(debug_stacktrace_observer& printer)
 {
-	dbghelp_dll = LoadLibrary(DBGHELP_DLL);
-	if(dbghelp_dll == NULL)
+	memset(&dbg_ctx, 0, sizeof(dbg_ctx));
+	dbg_ctx.dbghelp_dll = LoadLibrary(DBGHELP_DLL);
+	if(dbg_ctx.dbghelp_dll == NULL)
 	{
 		printer.print_string_fmt(
 			"failed to load %s: %s\n", DBGHELP_DLL, WIN_GetFormattedGLE().c_str());
 		return false;
 	}
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
+#endif
 #define XX(name, type)                                                                           \
-	name##_ = (type)GetProcAddress(dbghelp_dll, #name);                                          \
-	if(name##_ == nullptr)                                                                       \
+	dbg_ctx.name##_ = (type)GetProcAddress(dbg_ctx.dbghelp_dll, #name);                                          \
+	if(dbg_ctx.name##_ == nullptr)                                                                       \
 	{                                                                                            \
 		printer.print_string_fmt(                                                                \
 			"failed to load %s in %s: %s\n", #name, DBGHELP_DLL, WIN_GetFormattedGLE().c_str()); \
@@ -459,9 +548,12 @@ __attribute__((no_sanitize("cfi-icall"))) static bool
 	}
 	DBGHELP_FUNC_MAP(XX)
 #undef XX
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 	DWORD opts;
 	// initialize the symbol loading code
-	opts = SymGetOptions_();
+	opts = dbg_ctx.SymGetOptions_();
 
 	opts |= SYMOPT_LOAD_LINES;
 	opts |= SYMOPT_DEFERRED_LOADS;
@@ -477,17 +569,17 @@ __attribute__((no_sanitize("cfi-icall"))) static bool
 	// Set the 'load lines' option to retrieve line number information;
 	//   set the Deferred Loads option to map the debug info in memory only
 	//   when needed.
-	SymSetOptions_(opts);
+	dbg_ctx.SymSetOptions_(opts);
 
 	// Initialize the debughlp DLL with the default path and automatic
 	//   module enumeration (and loading of symbol tables) for this process.
 
-	SymInitialize_(GetCurrentProcess(), NULL, TRUE);
+	dbg_ctx.SymInitialize_(GetCurrentProcess(), NULL, TRUE);
 
 	return true;
 
 cleanup:
-	if(dbghelp_dll) FreeLibrary(dbghelp_dll);
+	if(dbg_ctx.dbghelp_dll) FreeLibrary(dbg_ctx.dbghelp_dll);
 
 	return false;
 }
@@ -495,15 +587,15 @@ cleanup:
 // Cleanup the dbghelp.dll library
 __attribute__((no_sanitize("cfi-icall"))) static void cleanup_debughlp()
 {
-	SymCleanup_(GetCurrentProcess());
+	dbg_ctx.SymCleanup_(GetCurrentProcess());
 
-	FreeLibrary(dbghelp_dll);
+	FreeLibrary(dbg_ctx.dbghelp_dll);
 
-#define XX(name, type) name##_ = nullptr;
+#define XX(name, type) dbg_ctx.name##_ = nullptr;
 	DBGHELP_FUNC_MAP(XX)
 #undef XX
 
-	dbghelp_dll = NULL;
+	dbg_ctx.dbghelp_dll = NULL;
 }
 
 __declspec(noinline) bool write_win32_stacktrace(debug_stacktrace_observer& printer, int skip)
@@ -540,6 +632,7 @@ __declspec(noinline) bool
 	return ret;
 }
 
+//__attribute__((no_sanitize("cfi-icall")))
 bool debug_win32_write_function_detail(uintptr_t stack_frame, debug_stacktrace_observer& printer)
 {
 	if(!load_dbghelp_dll(printer))
@@ -547,23 +640,29 @@ bool debug_win32_write_function_detail(uintptr_t stack_frame, debug_stacktrace_o
 		return false;
 	}
 	write_function_detail(stack_frame, 0, printer);
+
+#if 0
+	// (BUT mingw should be using dbghelp if it was using
 	if(cv_bt_show_inlined_functions.data() != 0)
 	{
 		HANDLE proc = GetCurrentProcess();
-		DWORD inline_count = SymAddrIncludeInlineTrace_(proc, stack_frame);
+		DWORD inline_count = dbg_ctx.SymAddrIncludeInlineTrace_(proc, stack_frame);
 		if(inline_count > 0)
 		{
 			DWORD inline_context(0), frameIndex(0);
-			if(SymQueryInlineTrace_(proc, stack_frame, 0, stack_frame, stack_frame, &inline_context, &frameIndex))
+			if(dbg_ctx.SymQueryInlineTrace_(
+				   proc, stack_frame, 0, stack_frame, stack_frame, &inline_context, &frameIndex))
 			{
 				for(DWORD frame = 0; frame < inline_count; frame++, inline_context++)
 				{
-					write_inline_function_detail(proc, stack_frame, inline_context, frame + 1, printer);
+					write_inline_function_detail(
+						proc, stack_frame, inline_context, frame + 1, printer);
 					// showInlineVariablesAt(os, stackFrame, *context, inline_context)
 				}
 			}
 		}
 	}
+#endif
 	cleanup_debughlp();
 	return true;
 }

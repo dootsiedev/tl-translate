@@ -151,6 +151,8 @@ if (MSVC)
 
         # I want relwithdebinfo to be closer to release
         string( REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO}")
+		# much smaller binary.
+		set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /OPT:REF")
     endif()
 
     if(NO_RTTI)
@@ -331,6 +333,7 @@ if(USE_ASAN)
 endif()
 
 
+
 # don't forget to use ubsan_options=print_stacktrace=1, and make sure llvm_symbolizer is in PATH.
 option(USE_UBSAN "Use undefined behavior sanitizer" OFF)
 if(USE_UBSAN)
@@ -349,7 +352,7 @@ if(USE_UBSAN)
     option(USE_UBSAN_TRAP "this makes the program stop, and raise the debugger" OFF)
     # (faster?) hardening: -fsanitize-minimal-runtime -fno-sanitize-merge
     if(USE_UBSAN_TRAP)
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        if(MY_CLANG)
             target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-trap=undefined)
             target_link_options(ALL_SANITIZERS INTERFACE -fsanitize-trap=undefined)
         else()
@@ -374,7 +377,7 @@ if(USE_UBSAN)
         #target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-minimal-runtime -fno-sanitize-merge)
     else()
         # these are clang specific, and these flags cause many false positives (especially implicit-conversion)
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        if(MY_CLANG)
             target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize=unsigned-integer-overflow -fsanitize=nullability -fsanitize=implicit-conversion -fsanitize=local-bounds)
         endif()
     endif()
@@ -414,7 +417,8 @@ if(USE_FORTIFY)
     target_compile_options(ALL_SANITIZERS INTERFACE -D_FORTIFY_SOURCE=2)
 endif()
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+
+if(MY_CLANG)
 
     if(NOT WIN32)
         option(USE_CLANG_SAFESTACK "enable clang's fsanitize=safe-stack (linux only)" ${USE_SIMPLE_HARDEN})
@@ -431,26 +435,35 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     option(USE_CFI "Use clang's Control Flow Integrety sanitizer" OFF)
     if(USE_CFI)
         if(NOT USE_LTO)
-            # note I think CMAKE_INTERPROCEDURAL_OPTIMIZATION will use -flto=thin instead of -flto
-            # but I think the llvm IR is all that matters.
             message(WARNING "you must enable USE_LTO with USE_CLANG_CFI")
         endif()
 
         target_compile_options(ALL_SANITIZERS INTERFACE -DMY_FIX_CFI_ICALL)
 
-        #visibility hidden is required
-        target_compile_options(ALL_SANITIZERS INTERFACE -fvisibility=hidden)
+        # TODO: I probably could check for CFI sanitizer using a macro?
+        target_compile_options(ALL_SANITIZERS INTERFACE -DFIX_OPENGL_CFI_ICALL)
 
+        #note I think CMAKE_INTERPROCEDURAL_OPTIMIZATION will actually
+        #emit something different than -flto, but I think the llvm IR is all that matters.
+        #target_compile_options(ALL_SANITIZERS INTERFACE -flto)
+        #target_link_options(ALL_SANITIZERS INTERFACE -flto)
+
+        #visibility hidden is required
+        if(NOT WIN32)
+            target_compile_options(ALL_SANITIZERS INTERFACE -fvisibility=hidden)
+        endif()
+
+        #on my system, std::to_string would cause an indirect call error...
+        #maybe that is libstd++'s fault, maybe libc is needed.
         target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize=cfi)# -fno-sanitize=cfi-icall -fsanitize-cfi-icall-generalize-pointers)
         target_link_options(ALL_SANITIZERS INTERFACE -fsanitize=cfi)# -fno-sanitize=cfi-icall -fsanitize-cfi-icall-generalize-pointers)
         #target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-ignorelist=cfi_ignorelist.txt)
         #target_link_options(ALL_SANITIZERS INTERFACE -fsanitize-ignorelist=cfi_ignorelist.txt)
 
-        # this is supposed to speed up linking with flto=thin, but it doesn't feel like it.
+        # this is supposed to speed up linking with flto=thin, but it doesn't feel it.
         target_link_options(ALL_SANITIZERS INTERFACE -Xclang -funique-source-file-names)
 
         if(PORTABLE)
-            # I think this is set by default
             target_compile_options(ALL_SANITIZERS INTERFACE -fsanitize-trap=cfi)
             target_link_options(ALL_SANITIZERS INTERFACE -fsanitize-trap=cfi)
         else()
@@ -504,15 +517,17 @@ if(NOT WIN32)
     endif()
 endif()
 
-option(USE_STACK_PROTECTOR "enable -fstack-protector-strong" OFF)
-if(USE_STACK_PROTECTOR)
-    target_compile_options(ALL_SANITIZERS INTERFACE -fstack-protector-strong)
-    target_link_options(ALL_SANITIZERS INTERFACE -fstack-protector-strong)
-endif()
+if(NOT MSVC OR MY_CLANG_CL)
+    option(USE_STACK_PROTECTOR "enable -fstack-protector-strong" OFF)
+    if(USE_STACK_PROTECTOR)
+        target_compile_options(ALL_SANITIZERS INTERFACE -fstack-protector-strong)
+        target_link_options(ALL_SANITIZERS INTERFACE -fstack-protector-strong)
+    endif()
 
-if(NOT USE_STACK_PROTECTOR AND USE_SIMPLE_HARDEN)
-    target_compile_options(ALL_SANITIZERS INTERFACE -fstack-protector)
-    target_link_options(ALL_SANITIZERS INTERFACE -fstack-protector)
+    if(NOT USE_STACK_PROTECTOR AND USE_SIMPLE_HARDEN)
+        target_compile_options(ALL_SANITIZERS INTERFACE -fstack-protector)
+        target_link_options(ALL_SANITIZERS INTERFACE -fstack-protector)
+    endif()
 endif()
 
 #
@@ -544,9 +559,6 @@ endif()
 #
 # start of project
 #
-
-
-
 add_executable(${PROJECT_NAME}
         $<$<BOOL:${WIN32}>:translate.manifest>
 
@@ -560,8 +572,6 @@ add_executable(${PROJECT_NAME}
 		code/translate.cpp
 		code/translation_context.h
 		code/translation_context.cpp
-		code/translation_parser.h
-		code/translation_parser.cpp
 
         code/core/global_pch.h
         code/core/global.h
@@ -588,38 +598,51 @@ add_executable(${PROJECT_NAME}
         code/datastructures/BS_stream.h
         code/datastructures/BS_stream.cpp
         code/datastructures/linklist.h
+
         code/datastructures/event_listener_observer.h
         code/datastructures/event_listener_observer.cpp
 )
 
+# put the parser into it's own file so I can remove the debug info from it.
+add_library(TL_PARSER OBJECT EXCLUDE_FROM_ALL
+        code/translation_parser.h
+        code/translation_parser.cpp)
+
+# for msvc... I either need to set the target to STATIC instead of OBJECT and use /DEBUG:NONE I think.
+# but I worry that it's not gonna do what I want it to do
+if(NOT MSVC OR MY_CLANGCL)
+    # get rid of that pesky debug info (I can still get annoying stacktraces /sanitization that fills the whole screen)
+    target_compile_options(TL_PARSER PRIVATE -g0)
+endif()
+
+# add the options
+target_link_libraries(TL_PARSER MY_OPTIONS_FLAGS)
+if(USE_UBSAN AND MY_CLANG)
+    # I copy the sanitizer flags so that I can call fno-sanitize=implicit-conversion AFTER adding sanitizers...
+    # there is probably a better way... I think using set() instead of a target would help.
+    get_target_property(COPY_ALL_SAN_COMPILE_PROPERTIES ALL_SANITIZERS INTERFACE_COMPILE_OPTIONS)
+    get_target_property(COPY_ALL_SAN_LINK_PROPERTIES ALL_SANITIZERS INTERFACE_LINK_OPTIONS)
+
+    target_compile_options(TL_PARSER PRIVATE ${COPY_ALL_SAN_COMPILE_PROPERTIES})
+    target_link_options(TL_PARSER PRIVATE ${COPY_ALL_SAN_LINK_PROPERTIES})
+
+    target_compile_options(TL_PARSER PRIVATE -fno-sanitize=implicit-conversion)
+else()
+    target_link_libraries(TL_PARSER ALL_SANITIZERS)
+endif()
 
 #uhh... this should be part of MY_COMPILER_FLAGS, but I chose not...
 add_library(MY_OPTIONS_FLAGS INTERFACE EXCLUDE_FROM_ALL)
 
-option(USE_SMALLER_DEBUG_INFO "reduce the debug info size even if it harms the info" OFF)
-if(USE_SMALLER_DEBUG_INFO)
-if(MY_CLANG)
-    target_compile_options(MY_OPTIONS_FLAGS INTERFACE -gline-tables-only)
-    target_link_options(MY_OPTIONS_FLAGS INTERFACE -gline-tables-only )
-elseif(MSVC)
-    # much smaller binary, but this will damage the debug info.
-    # a better option would be to replace /PDB with /PDBSTRIPPED, and copy the stripped PDB during install
-    target_link_options(MY_OPTIONS_FLAGS INTERFACE /OPT:REF)
-else(GNUC)
-    # or -fno-standalone-debug or
-    target_compile_options(MY_OPTIONS_FLAGS INTERFACE -g1)
-    target_link_options(MY_OPTIONS_FLAGS INTERFACE -g1)
-endif()
+if(MY_CLANG_CL)
+    target_compile_options(MY_OPTIONS_FLAGS INTERFACE -fansi-escape-codes -fcolor-diagnostics)
 endif()
 
-# this works surprisingly well, similar results as clang-cl (not too surprising)
-# msvc SEEMS to give better results however when it comes to optimized debug info.
-# but not tested much.
 if(MINGW)
     option(USE_MINGW_PDB "make mingw use codeview pdb files" OFF)
     if(USE_MINGW_PDB)
         target_compile_options(MY_OPTIONS_FLAGS INTERFACE -gcodeview)
-        target_link_options(MY_OPTIONS_FLAGS INTERFACE -Wl,--pdb=)
+        target_link_options(MY_OPTIONS_FLAGS INTERFACE -Xlinker --strip-debug -Wl,--pdb=)
     endif()
 endif()
 
@@ -772,6 +795,7 @@ endif()
 
 
 target_link_libraries(${PROJECT_NAME} ALL_SANITIZERS MY_OPTIONS_FLAGS)
+target_link_libraries(${PROJECT_NAME} TL_PARSER)
 target_compile_options(${PROJECT_NAME} PRIVATE ${MY_COMPILER_FLAGS})
 
 
@@ -971,6 +995,7 @@ if(BUILD_TESTS)
     # I want to fetchContent this just for fun, but I don't know if fetchcontent will let me set the build flags.
     add_subdirectory(tools/merge-strings)
 
+    target_link_libraries(merge-strings TL_PARSER)
     target_link_libraries(merge-strings ALL_SANITIZERS MY_OPTIONS_FLAGS)
     target_compile_options(merge-strings PRIVATE ${MY_COMPILER_FLAGS})
 endif()

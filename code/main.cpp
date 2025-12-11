@@ -8,8 +8,7 @@
 
 #include "core/asan_helper.h"
 
-#ifdef _WIN32
-
+#if defined(_WIN32) && !defined(DISABLE_WIN32_TERM)
 // for SetConsoleOutputCP
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -19,14 +18,12 @@
 #undef ERROR
 #endif
 
-// for cv_win_unicode_hack
-#include <fcntl.h>
-#include <io.h>
-#include <stdio.h>
+static REGISTER_CVAR_INT(
+	cv_win_unicode_hack,
+	1,
+	"0 = just print utf8 to stdout (this should just work), 1 = SetConsoleOutputCP (clion does not print unicode in run, unless I set system wide locale to experimental utf8)",
+	CVAR_T::STARTUP);
 
-//defined in global.cpp (I really should put this into a header...)
-extern cvar_int cv_win_unicode_hack;
-extern bool g_win_unicode_trigger;
 #endif
 
 int main(int argc, char** argv)
@@ -42,19 +39,9 @@ int main(int argc, char** argv)
 	case CVAR_LOAD::CLOSE: return 0;
 	}
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(DISABLE_WIN32_TERM)
 	if(cv_win_unicode_hack.data() == 1)
 	{
-		g_win_unicode_trigger = true;
-		_setmode(_fileno(stdout), _O_U8TEXT);
-	}
-	if(cv_win_unicode_hack.data() == 2)
-	{
-		// With conemu, I get an address sanitizer error UNLESS I check GetACP
-		// it points to <unknown module> at address 0
-		// you can just enable the Beta: Use Unicode UTF-8 for worldwide language support
-		// or use chcp 65001
-		// and I believe that if you had a Japanese Locale, japanese text should print fine.
 		if(SetConsoleOutputCP(CP_UTF8) == FALSE)
 		{
 			slogf(

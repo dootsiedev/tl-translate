@@ -20,10 +20,11 @@
 // clang asan does not have this function.
 #if defined(_MSC_VER) && !defined(__clang__)
 #define USE_ASAN_COE
-inline int setenv(const char *name, const char *value, int overwrite)
+inline int setenv(const char* name, const char* value, int overwrite)
 {
 	int errcode = 0;
-	if(!overwrite) {
+	if(!overwrite)
+	{
 		size_t envsize = 0;
 		errcode = getenv_s(&envsize, NULL, 0, name);
 		if(errcode || envsize) return errcode;
@@ -52,7 +53,10 @@ extern "C" const char* __asan_default_options()
 		// this would not happen in SDL
 		if(SetEnvironmentVariable("COE_LOG_FILE", "ASAN_REPORT.log") == FALSE)
 		{
-			fprintf(stderr, "SetEnvironmentVariableW: %s\n", WIN_GetFormattedGLE(GetLastError()).c_str());
+			fprintf(
+				stderr,
+				"SetEnvironmentVariableW: %s\n",
+				WIN_GetFormattedGLE(GetLastError()).c_str());
 		}
 #else
 		int ret = setenv("COE_LOG_FILE", "ASAN_REPORT.log", 0);
@@ -96,6 +100,8 @@ void my_asan_handler(const char* msg)
 	// (if slog started printing to a file without redirection, add that here)
 	fflush(stdout);
 	fputs(msg, stderr);
+	// on windows it wont flush on crash if it's piped?
+	fflush(stderr);
 #endif
 	{
 		// I like the idea of opening a dialog box,
@@ -109,8 +115,19 @@ void my_asan_handler(const char* msg)
 	// (probably because abort() depends on the CRT which I bet the asan.dll does not link to)
 #if defined(_WIN32) && defined(__clang__)
 	// 71 is copied from windows_fast_fail_on_error
-	__fastfail(71);
-	// I could use RaiseFailFastException + __asan_get_report_pc
+	//__fastfail(71);
+	// I feel like this SHOULD move the exception address to the address you pass in...
+	// but it wont....
+#if 1
+	EXCEPTION_RECORD record;
+	memset(&record, 0, sizeof(record));
+	record.ExceptionAddress = __asan_get_report_pc();
+	record.ExceptionCode = 71;
+	record.NumberParameters = 2;
+	record.ExceptionInformation[0] = reinterpret_cast<uintptr_t>(__asan_get_report_pc());
+	record.ExceptionInformation[0] = reinterpret_cast<uintptr_t>(__asan_get_report_address());
+	RaiseFailFastException(&record, NULL, FAIL_FAST_GENERATE_EXCEPTION_ADDRESS);
+#endif
 #endif
 }
 void init_asan()

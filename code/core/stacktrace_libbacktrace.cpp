@@ -42,113 +42,6 @@ REGISTER_CVAR_INT(
 #include <cxxabi.h>
 #endif
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-// stolen from whereami.h
-int getModulePath_(HMODULE module, char* out, int capacity, int* dirname_length)
-{
-	// TODO: I could avoid finding the address 2 times... I could return a unique_ptr.
-	// but if I wanted performance... I could use MAX_PATH + get rid of wide functions.
-	wchar_t buffer1[MAX_PATH];
-	wchar_t buffer2[MAX_PATH];
-	wchar_t* path;
-	// this was modified.
-	std::unique_ptr<wchar_t[]> path_buf;
-	int length = -1;
-
-	for(;;)
-	{
-		DWORD size;
-		int length_, length__;
-
-		size = GetModuleFileNameW(module, buffer1, std::size(buffer1));
-
-		if(size == 0) break;
-		if(size == std::size(buffer1))
-		{
-			DWORD size_ = size;
-			int count = 0;
-			do
-			{
-				// I don't trust this loop.
-				if(count > 100)
-				{
-					fprintf(stderr, "%s: infinite loop \n", __func__);
-					return -1;
-				}
-				++count;
-				// this is a lot worse than the original realloc code...
-				auto temp = std::move(path_buf);
-				path_buf = std::make_unique<wchar_t[]>(size_ * 2);
-				memcpy(path_buf.get(), temp.get(), size_);
-				path = path_buf.get();
-				temp.reset();
-
-				size_ *= 2;
-				// path = path_;
-				size = GetModuleFileNameW(module, path, size_);
-			} while(size == size_);
-
-			if(size == size_) break;
-		}
-		else
-			path = buffer1;
-
-		if(!_wfullpath(buffer2, path, MAX_PATH)) break;
-		length_ = wcslen(buffer2);
-		length__ = WideCharToMultiByte(CP_UTF8, 0, buffer2, length_, out, capacity, NULL, NULL);
-
-		if(length__ == 0)
-			length__ = WideCharToMultiByte(CP_UTF8, 0, buffer2, length_, NULL, 0, NULL, NULL);
-		if(length__ == 0) break;
-
-		if(length__ <= capacity && dirname_length)
-		{
-			int i;
-
-			for(i = length__ - 1; i >= 0; --i)
-			{
-				if(out[i] == '\\')
-				{
-					*dirname_length = i;
-					break;
-				}
-			}
-		}
-
-		length = length__;
-
-		break;
-	}
-
-	return length;
-}
-
-int getModulePath(void* address, char* out, int capacity, int* dirname_length)
-{
-	HMODULE module;
-	int length = -1;
-
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4054)
-#endif
-	if(GetModuleHandleEx(
-		   GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-		   static_cast<LPCTSTR>(address),
-		   &module))
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
-	{
-		length = getModulePath_(module, out, capacity, dirname_length);
-	}
-
-	return length;
-}
-
-#endif
 
 enum
 {
@@ -185,7 +78,10 @@ struct bt_state_wrapper
 		{
 			// TODO: if errnum is positive it's an errno
 			fprintf(
-				stderr, "libbacktrace error(%d): %s\n", errnum, (msg != nullptr ? msg : "no error?"));
+				stderr,
+				"libbacktrace error(%d): %s\n",
+				errnum,
+				(msg != nullptr ? msg : "no error?"));
 			return;
 		}
 
@@ -334,21 +230,27 @@ struct bt_payload
 			// I don't know if it works on linux.
 			// backtrace_syminfo requires the symbol table but does not require the debug info.
 			// I assume on linux this gives the same result as dinfo.dli_sname?
-			payload->syminfo_module = module_name;
+			syminfo_module = module_name;
 			if(backtrace_syminfo(
-				   payload->state, pc, bt_syminfo_callback, bt_error_callback, vdata) == 1)
+				   state.get(), pc, bt_syminfo_callback_wrap, error_callback_wrap, this) == 1)
 			{
-				payload->check_trimmed(pc);
-				payload->idx++;
+				check_trimmed(pc, function);
+				idx++;
 				return 0;
 			}
 		}
 #else
 #ifdef USE_WIN32_DEBUG_INFO
+		// if you have USE_MINGW_PDB
 		if(function == NULL)
 		{
-			// dbghelp modules will not have a path or file extension.
-			//  I could easily fix that, but I like using it as a hint.
+			// This will work, if you have both dwarf and -gcodeview data.
+			// But debuggers will be confused by the dwarf info
+			// (for example, windbg won't seek the source code / inspect variables,
+			// BUT it will still find the exception location if you use -v analyze)
+			// If you remove the dwarf info, it breaks libbacktrace.
+			// So, the conclusion is, don't mix dwarf with codeview.
+			// ATM I pass in -Xlinker --strip-debug, and it seems to keep the pdb info.
 			if(debug_win32_write_function_detail(pc, printer))
 			{
 				check_trimmed(pc, function);
@@ -364,9 +266,9 @@ struct bt_payload
 		// but I have not benchmarked this.
 		void* addr;
 		memcpy(&addr, &pc, sizeof(void*));
-		int length = getModulePath(addr, nullptr, 0, nullptr);
+		int length = WIN32_getModulePath(addr, nullptr, 0, nullptr);
 		std::unique_ptr<char[]> path = std::make_unique<char[]>(length + 1);
-		if(getModulePath(addr, path.get(), length, nullptr) == length)
+		if(WIN32_getModulePath(addr, path.get(), length, nullptr) == length)
 		{
 			path[length] = '\0';
 			module_name = path.get();
@@ -526,7 +428,7 @@ __attribute__((noinline)) bool
 	// I noticed that using this would not give the optimized address for SDL_AppXXX functions...
 	// Also this will print inlined templates (I wonder why libbacktrace excludes it)
 	// BUT inlined templates are very incorrect, so I wonder what is going on...
-	std::unique_ptr<void*[]> stack_info = std::make_unique<void*[]>(cv_bt_max_depth.data());
+	std::unique_ptr<void*[]> stack_info = std::make_unique<void*[]>(cv_bt_max_depth.data() + 1);
 
 	// apparently this function breaks easily with anything nonstandard.
 	// TODO: I think <stacktrace> won't retrieve function name, until you call name()

@@ -6,7 +6,7 @@
 
 #ifndef DISABLE_SDL
 // this shouldn't be here, but I need it for the window for show_error
-#include "app.h"
+#include "../app.h"
 #endif
 
 #include "stacktrace.h"
@@ -109,7 +109,7 @@ static void exit_fullscreen()
 // (because show_error is used in assert, serr uses assert...)
 bool show_error(const char* title, const char* message)
 {
-	#ifndef DISABLE_SDL
+#ifndef DISABLE_SDL
 	// TODO: try to avoid showing more than 1 window at a time.
 	// I use this in ASSERT dummy!
 	// ASSERT(title != NULL);
@@ -239,7 +239,7 @@ bool show_error(const char* title, const char* message)
 				// I should use an exception if I caught them.
 				std::quick_exit(EXIT_FAILURE);
 			default:
-				fprintf(stderr,"Unknown result from SDL_ShowMessageBox (%s: %s)\n", __func__, title);
+				fprintf(stderr, "Unknown result from SDL_ShowMessageBox (%s: %s)\n", __func__, title);
 				MY_BREAKPOINT;
 			}
 		}
@@ -263,9 +263,9 @@ bool show_error(const char* title, const char* message)
 		return SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, message_buf, nullptr);
 	}
 	return SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, message_buf, g_app.window);
-	#else // DISABLE_SDL
+#else // DISABLE_SDL
 	return true;
-	#endif
+#endif
 }
 
 #ifndef DISABLE_CUSTOM_ASSERT

@@ -13,6 +13,19 @@ extern cvar_int cv_bt_trim_stacktrace;
 extern cvar_int cv_has_stacktrace_libbacktrace;
 extern cvar_int cv_has_stacktrace_dbghelp;
 
+#ifdef _WIN32
+// stolen from whereami.h
+/*
+	int length = WIN32_getModulePath(addr, nullptr, 0, nullptr);
+	// I don't think I need the +1 but I am unsure
+	std::unique_ptr<char[]> path = std::make_unique<char[]>(length + 1);
+	if(WIN32_getModulePath(addr, path.get(), length, nullptr) == length)
+ */
+int WIN32_getModulePath(void* address, char* out, int capacity, int* dirname_length);
+// I could add in WIN32_getProgramPath if I needed it.
+//int WIN32_getModulePath_(HMODULE* hmodule, char* out, int capacity, int* dirname_length);
+#endif
+
 #if defined(__EMSCRIPTEN__)
 
 class debug_stacktrace_string_printer

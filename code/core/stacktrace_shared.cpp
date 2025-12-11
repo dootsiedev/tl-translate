@@ -200,6 +200,115 @@ void trim_stacktrace_print_helper(debug_stacktrace_observer& printer, int trim_s
 }
 #endif
 
+// get module if you enable full paths cvar.
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+// stolen from whereami.h
+static int WIN32_getModulePath_(HMODULE module, char* out, int capacity, int* dirname_length)
+{
+	// TODO: I could avoid finding the address 2 times... I could return a unique_ptr.
+	// but if I wanted performance... I could use MAX_PATH + get rid of wide functions.
+	wchar_t buffer1[MAX_PATH];
+	wchar_t buffer2[MAX_PATH];
+	wchar_t* path;
+	// this was modified.
+	std::unique_ptr<wchar_t[]> path_buf;
+	int length = -1;
+
+	for(;;)
+	{
+		DWORD size;
+		int length_, length__;
+
+		size = GetModuleFileNameW(module, buffer1, std::size(buffer1));
+
+		if(size == 0) break;
+		if(size == std::size(buffer1))
+		{
+			DWORD size_ = size;
+			int count = 0;
+			do
+			{
+				// I don't trust this loop.
+				if(count > 100)
+				{
+					fprintf(stderr, "%s: infinite loop \n", __func__);
+					return -1;
+				}
+				++count;
+				// this is a lot worse than the original realloc code...
+				auto temp = std::move(path_buf);
+				path_buf = std::make_unique<wchar_t[]>(size_ * 2);
+				memcpy(path_buf.get(), temp.get(), size_);
+				path = path_buf.get();
+				temp.reset();
+
+				size_ *= 2;
+				// path = path_;
+				size = GetModuleFileNameW(module, path, size_);
+			} while(size == size_);
+
+			if(size == size_) break;
+		}
+		else
+			path = buffer1;
+
+		if(!_wfullpath(buffer2, path, MAX_PATH)) break;
+		length_ = wcslen(buffer2);
+		length__ = WideCharToMultiByte(CP_UTF8, 0, buffer2, length_, out, capacity, NULL, NULL);
+
+		if(length__ == 0)
+			length__ = WideCharToMultiByte(CP_UTF8, 0, buffer2, length_, NULL, 0, NULL, NULL);
+		if(length__ == 0) break;
+
+		if(length__ <= capacity && dirname_length)
+		{
+			int i;
+
+			for(i = length__ - 1; i >= 0; --i)
+			{
+				if(out[i] == '\\')
+				{
+					*dirname_length = i;
+					break;
+				}
+			}
+		}
+
+		length = length__;
+
+		break;
+	}
+
+	return length;
+}
+
+int WIN32_getModulePath(void* address, char* out, int capacity, int* dirname_length)
+{
+	HMODULE module;
+	int length = -1;
+
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4054)
+#endif
+	if(GetModuleHandleEx(
+		   GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		   static_cast<LPCTSTR>(address),
+		   &module))
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+	{
+		length = WIN32_getModulePath_(module, out, capacity, dirname_length);
+	}
+
+	return length;
+}
+
+#endif // _WIN32
+
 #ifndef __EMSCRIPTEN__
 
 #if __cpp_lib_stacktrace
@@ -244,10 +353,25 @@ MY_NOINLINE bool write_cpp23_stacktrace(debug_stacktrace_observer& printer, int 
 				auto lvalue_temp = frame.native_handle();
 				memcpy(&address_copy, &lvalue_temp, sizeof(address_copy));
 
+				const char* module = nullptr;
+#ifdef _WIN32
+				std::unique_ptr<char[]> module_path;
+				// <stacktrace> includes the module inside the .name(), but not the full path
+				if(cv_bt_full_paths.data() != 0)
+				{
+					int length = WIN32_getModulePath(frame.native_handle(), nullptr, 0, nullptr);
+					module_path = std::make_unique<char[]>(length + 1);
+					if(WIN32_getModulePath(frame.native_handle(), module_path.get(), length, nullptr) == length)
+					{
+						module = module_path.get();
+					}
+				}
+#endif
+
 				debug_stacktrace_info info{
 					.index = i,
 					.addr = address_copy,
-					.module = NULL,
+					.module = module,
 					.function = name.empty() ? nullptr : name.c_str(),
 					.file = file.empty() ? nullptr : file.c_str(),
 					.line = line};

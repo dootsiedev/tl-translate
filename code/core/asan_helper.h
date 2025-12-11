@@ -4,7 +4,8 @@
 #if __has_feature(address_sanitizer)
 #define MY_HAS_ASAN
 #endif
-#elif defined(__SANITIZE_ADDRESS__)
+#endif
+#if !defined(MY_HAS_ASAN) && defined(__SANITIZE_ADDRESS__)
 #define MY_HAS_ASAN
 #endif
 

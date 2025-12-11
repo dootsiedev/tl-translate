@@ -13,7 +13,7 @@
 // for a small test project, but I am keeping this in case I have another test project.
 // (I would need to make a few changes for it to work, mainly ASSERT/ASSERT_M)
 #ifndef DISABLE_CONSOLE
-#include "console.h"
+#include "../console.h"
 #endif
 
 #include <cstring>
@@ -40,18 +40,6 @@ REGISTER_CVAR_INT(
 	// a "capture" is a error that is handled, using serr_get_error()
 	"0 = nothing, 1 = stacktrace (once per capture), 2 = always stacktrace (spam)",
 	disable_if_no_stacktrace);
-
-#ifdef _WIN32
-extern cvar_int cv_win_unicode_hack;
-REGISTER_CVAR_INT(
-	cv_win_unicode_hack, // NOLINT(*-throwing-static-initialization)
-	0,
-	"0 = just print utf8 to stdout, 1 = _O_U8TEXT: utf8->fwrite(wchar_t*), 2 = chcp 65001, OR set your windows locale to utf8",
-	CVAR_T::RUNTIME);
-// set in main()
-extern bool g_win_unicode_trigger;
-bool g_win_unicode_trigger = false;
-#endif
 
 // I would use this if I was profiling, or if the logs were spamming.
 static REGISTER_CVAR_INT(cv_disable_log, 0, "0 = keep log, 2 = disable all logs", CVAR_T::RUNTIME);
@@ -262,19 +250,7 @@ static MY_NOINLINE void serr_safe_stacktrace(int skip)
 		msg += '\n';
 
 		internal_get_serr_buffer()->append(msg);
-#ifdef _WIN32
-		if(cv_win_unicode_hack.internal_data() == 1 && g_win_unicode_trigger)
-		{
-			// requires _setmode(_fileno(stdout), _O_U8TEXT);
-			// NOLINTNEXTLINE(*-narrowing-conversions)
-			std::wstring wtext = WIN_UTF8ToWide(msg.c_str(), msg.size());
-			fwrite(wtext.c_str(), sizeof(wchar_t), wtext.size(), stdout);
-		}
-		else
-#endif
-		{
-			fwrite(msg.c_str(), 1, msg.size(), stdout);
-		}
+		fwrite(msg.c_str(), 1, msg.size(), stdout);
 #ifndef DISABLE_CONSOLE
 		{
 #ifndef __EMSCRIPTEN__
@@ -296,18 +272,7 @@ void slog_raw(const char* msg, size_t len)
 	}
 	// on win32, if did a /subsystem:windows, I would probably
 	// replace stdout with OutputDebugString on the debug build.
-#ifdef _WIN32
-	if(cv_win_unicode_hack.internal_data() == 1 && g_win_unicode_trigger)
-	{
-		// NOLINTNEXTLINE(*-narrowing-conversions)
-		std::wstring wtext = WIN_UTF8ToWide(msg, len);
-		fwrite(wtext.c_str(), sizeof(wchar_t), wtext.size(), stdout);
-	}
-	else
-#endif
-		{
 	fwrite(msg, 1, len, stdout);
-}
 
 #ifndef DISABLE_CONSOLE
 	{
@@ -332,18 +297,7 @@ MY_NOINLINE void serr_raw(const char* msg, size_t len)
 	serr_safe_stacktrace(0);
 
 	internal_get_serr_buffer()->append(msg, msg + len);
-#ifdef _WIN32
-	if(cv_win_unicode_hack.internal_data() == 1 && g_win_unicode_trigger)
-	{
-		// NOLINTNEXTLINE(*-narrowing-conversions)
-		std::wstring wtext = WIN_UTF8ToWide(msg, len);
-		fwrite(wtext.c_str(), sizeof(wchar_t), wtext.size(), stdout);
-	}
-	else
-#endif
-	{
-		fwrite(msg, 1, len, stdout);
-	}
+	fwrite(msg, 1, len, stdout);
 
 #ifndef DISABLE_CONSOLE
 	{
@@ -380,25 +334,8 @@ __attribute__((format(printf, 1, 2))) void slogf(MY_MSVC_PRINTF const char* fmt,
 #endif
 
 #ifdef _WIN32
-	if(cv_win_unicode_hack.internal_data() == 1 && g_win_unicode_trigger)
-	{
-		// double redundant allocation...
-		// in C++26 std::inplace_vector could speed this up a decent amount for smallish strings.
-		// sadly, the big strings are exactly the type of strings that I need to optimize....
-		// (AKA, 100 depth stacktraces with 100k characters due to boost spirit hell).
-		std::string buffer;
-		str_vasprintf(buffer, fmt, args);
-		// NOLINTNEXTLINE(*-narrowing-conversions)
-		std::wstring wtext = WIN_UTF8ToWide(buffer.c_str(), buffer.size());
-		fwrite(wtext.c_str(), sizeof(wchar_t), wtext.size(), stdout);
-		// this requires all the %c %s arguments to also be wchar_t
-		// vfwprintf_s(stdout, wtext.c_str(), args);
-	}
-	else
-	{
-		// win32 has a compatible C standard library, but annex k prevents exploits or something.
-		vfprintf_s(stdout, fmt, args);
-	}
+	// win32 has a compatible C standard library, but annex k prevents exploits or something.
+	vfprintf_s(stdout, fmt, args);
 #else
 	vfprintf(stdout, fmt, args);
 #endif
@@ -432,44 +369,25 @@ MY_NOINLINE __attribute__((format(printf, 1, 2))) void serrf(MY_MSVC_PRINTF cons
 #ifndef DISABLE_CONSOLE
 	size_t serr_offset = internal_get_serr_buffer()->size();
 #endif
-#ifdef _WIN32
-	if(cv_win_unicode_hack.internal_data() == 1 && g_win_unicode_trigger)
-	{
-		// it would be a little better if I used the serr buffer, then passed a string_view into utf8
-		std::string buffer;
 
-		va_list args;
-		va_start(args, fmt);
-		str_vasprintf(buffer, fmt, args);
-		va_end(args);
+	va_list args;
+	va_start(args, fmt);
 
-		// NOLINTNEXTLINE(*-narrowing-conversions)
-		std::wstring wtext = WIN_UTF8ToWide(buffer.c_str(), buffer.size());
-		fwrite(wtext.c_str(), sizeof(wchar_t), wtext.size(), stdout);
-
-		*internal_get_serr_buffer() += buffer;
-	}
-	else
-#endif
-	{
-		va_list args;
-		va_start(args, fmt);
-
-		va_list temp_args;
-		va_copy(temp_args, args);
+	va_list temp_args;
+	va_copy(temp_args, args);
 
 #ifdef _WIN32
-		// win32 has a compatible C standard library, but annex k prevents exploits or something.
-		vfprintf_s(stdout, fmt, args);
+	// win32 has a compatible C standard library, but annex k prevents exploits or something.
+	vfprintf_s(stdout, fmt, args);
 #else
-		vfprintf(stdout, fmt, args);
+	vfprintf(stdout, fmt, args);
 #endif
-		va_end(args);
+	va_end(args);
 
-		va_start(temp_args, fmt);
-		str_vasprintf(*internal_get_serr_buffer(), fmt, temp_args);
-		va_end(temp_args);
-	}
+	va_start(temp_args, fmt);
+	str_vasprintf(*internal_get_serr_buffer(), fmt, temp_args);
+	va_end(temp_args);
+
 #ifndef DISABLE_CONSOLE
 	{
 #ifndef __EMSCRIPTEN__

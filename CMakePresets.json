@@ -10,7 +10,6 @@
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/../${sourceDirName}-${presetName}-install",
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
         "USE_CPP23": true,
-        "USE_CPP_STACKTRACE": false,
         "USE_WIN32_DEBUG_INFO": false,
         "TL_COMPILE_TIME_TRANSLATION": false,
         "TL_COMPILE_TIME_ASSERTS": true,
@@ -88,7 +87,8 @@
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
-        "USE_WIN32_DEBUG_INFO": true
+        "USE_WIN32_DEBUG_INFO": true,
+        "USE_CPP_STACKTRACE": true
       },
       "condition": {
         "type": "equals",
@@ -157,7 +157,7 @@
         "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",
         "CMAKE_TOOLCHAIN_FILE": "$env{MY_VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "USE_WIN32_DEBUG_INFO": true,
-        "USE_LIBBACKTRACE": true,
+        "USE_LIBBACKTRACE": false,
         "USE_MINGW_PDB": true
       }
     },
@@ -187,8 +187,8 @@
       "inherits": "llvm-mingw",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "USE_LTO": false,
-        "USE_CFI": false,
+        "USE_LTO": true,
+        "USE_CFI": true,
         "USE_SIMPLE_HARDEN": false,
         "USE_STACK_PROTECTOR": true,
         "USE_CET": true,

@@ -9,7 +9,7 @@
 
 #ifndef DISABLE_SDL
 // I shouldn't need this, but I need to get the window for opening a dialog box.
-#include "app.h"
+#include "../app.h"
 #endif // DISABLE_SDL
 
 // for reading files, since I like the stream API.

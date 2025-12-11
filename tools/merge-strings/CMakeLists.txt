@@ -16,14 +16,10 @@ add_executable(merge-strings
 
         main.cpp
 
-        # Kind of ugly, there could be a better way of organizing this.
-        ../../code/translation_parser.h
-        ../../code/translation_parser.cpp
-
         ../../code/util/utf8_stuff.h
         ../../code/util/utf8_stuff.cpp
-
 )
+target_link_libraries(merge-strings TL_PARSER)
 target_compile_definitions(merge-strings PUBLIC MY_DISABLE_GLOBAL_DEP TL_ENABLE_FORMAT)
 target_include_directories(merge-strings SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/cxxopts")
 

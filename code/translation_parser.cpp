@@ -2,54 +2,34 @@
 // PVS-Studio Static Code Analyzer for C, C++, C#, and Java: https://pvs-studio.com
 
 //
-// TODO: supress ubsan unsigned overflow errors...
-// TODO: convert the utf8 to wide, and print to the win32 console on windows... (or utf8 manifest)
-// OPT: check out the C++20 stringview attribute, could be significantly faster.
+// (I use -fno-sanitize=implicit-conversion) T ODO: supress ubsan unsigned overflow errors...
+// OPT: check out the C++20 stringview attribute?
 //
-// u32string is 2x slower than std::string,
-// but I assume I MUST use it for getting the correct unicode position of the formatted error.
-// but I think maybe I could write my own formatter that parses the utf8
-// (but it probably needs to scan for newlines...)
-//
-// OPT: kind of late, but can a code-gen parsing library
-// replace boost parser with the same level of simplicity?
+// OPT: I think I could replace the printf formatting by hand parsing
+// and the macro parsing could be done in something like FLEX
 //
 // long wall of not very useful info
 //
 // so the results of this is that parsing wastes a lot of binary space,
 // and it's painfully slow to build + LSP this one file (5 seconds).
+// It produces binaries between 400kb (+10mb debug info) for optimized
+// to 10-20mb (30-40mb debug info) for a debug build + static + all the sanitizers.
+// I build this file with no debug info (-g0) for all configurations,
+// which makes the debug info 10x smaller.
 //
-// but boost parser was easy (as long as I was not reading any errors...),
-// and the errors are 100x better than anything I could write,
-// and I think I could add something new in a few minutes.
+// boost parser was easy to use (as long as I was not reading any errors...),
+// and I could add or modify anything in a few minutes (but it's not magic)
 // And I don't need boost, unlike boost spirit x3/x4
 //
 // boost spirit x3/x4 has no-exception support (unlike parser),
 // but vcpkg spirit uses 500mb for x64-windows (I THOUGHT IT WAS HEADER ONLY!).
 // I tried boost spirit x4 from github but I got errors due to lacking boost libraries.
-// (I did get pretty close to getting it working, I think it didn't understand tuples or something)
 // however boost parser without boost hana needs ugly tuples... (I think)
 //
 // I might be leaning towards including the library with FetchContent and keeping the ugly tuples
 // (unless vcpkg boost parser is header only and setup takes the same time as FetchContent)
 //
-// these numbers are old.
-// msvc release build is 300kb and 10mb of debug info (50kb + 3mb without parser)
-// msvc debug-san build is 3mb and 30mb of debug info (600kb + 2mb without parser)
-//
-// clang-cl crashes if a parsing error occurs (can't do exceptions) unless it's reldeb & no asan.
-// clang-cfi crashes on old versions, it works tested with LLVM 21
-//
-// If C++ exceptions or optimized binary bloat became a hard blocker (wasm),
-// - I could make a custom cmake command that converts the files into json or something.
-//	 I think I could use the -E preprocessor command, but it won't be formatted nicely...
-//	 or for speed, I could use a binary flatbuffer
-// - I could modify parser and remove the exceptions and just print the error handler and exit().
-//  2 problems:
-//  I don't exactly know if I can call the error handler in the throw, yet (the parser rethrows)
-//  I need a utf8 library because parser will throw utf8 errors (I think).
-//
-// I would have looked into spirit-po if it did not use C++ exceptions.
+// I would have considered spirit-po if it did not use C++ exceptions.
 // spirit-po does have plural handling that I don't support.
 //
 //
