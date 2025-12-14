@@ -127,34 +127,59 @@ struct entry_ast
 	}
 };
 
+// NOLINTBEGIN(*-readability-casting,*-implicit-bool-conversion)
+
 // TODO: replace with hungarian method
 //  https://github.com/jamespayor/weighted-bipartite-perfect-matching/blob/master/test.cpp
 
-struct WeightedBipartiteEdge {
+struct WeightedBipartiteEdge
+{
 	int left;
 	int right;
 	int cost;
 
-	WeightedBipartiteEdge() : left(), right(), cost() {}
-	WeightedBipartiteEdge(int left, int right, int cost) : left(left), right(right), cost(cost) {}
+	WeightedBipartiteEdge()
+	: left()
+	, right()
+	, cost()
+	{
+	}
+	WeightedBipartiteEdge(int left, int right, int cost)
+	: left(left)
+	, right(right)
+	, cost(cost)
+	{
+	}
 };
-static std::pair<int, std::vector<int> > bruteForceInternal(const int n, const std::vector<WeightedBipartiteEdge> edges, std::vector<bool>& leftMatched, std::vector<bool>& rightMatched, const int edgeUpTo = 0, const int matchCount = 0) {
-	if (matchCount == n) {
+static std::pair<int, std::vector<int>> bruteForceInternal(
+	const int n,
+	const std::vector<WeightedBipartiteEdge> edges,
+	std::vector<bool>& leftMatched,
+	std::vector<bool>& rightMatched,
+	const int edgeUpTo = 0,
+	const int matchCount = 0)
+{
+	if(matchCount == n)
+	{
 		return std::make_pair(0, std::vector<int>());
 	}
 
 	int bestCost = 1 << 20;
 	std::vector<int> bestEdges;
-	for (int edgeIndex = edgeUpTo; edgeIndex < edges.size(); ++edgeIndex) {
+	for(int edgeIndex = edgeUpTo; edgeIndex < edges.size(); ++edgeIndex)
+	{
 		const WeightedBipartiteEdge& edge = edges[edgeIndex];
-		if (!leftMatched[edge.left] && !rightMatched[edge.right]) {
+		if(!leftMatched[edge.left] && !rightMatched[edge.right])
+		{
 			leftMatched[edge.left] = true;
 			rightMatched[edge.right] = true;
-			std::pair<int, std::vector<int> > remainder = bruteForceInternal(n, edges, leftMatched, rightMatched, edgeIndex + 1, matchCount + 1);
+			std::pair<int, std::vector<int>> remainder = bruteForceInternal(
+				n, edges, leftMatched, rightMatched, edgeIndex + 1, matchCount + 1);
 			leftMatched[edge.left] = false;
 			rightMatched[edge.right] = false;
 
-			if (remainder.first + edge.cost < bestCost) {
+			if(remainder.first + edge.cost < bestCost)
+			{
 				bestCost = remainder.first + edge.cost;
 				bestEdges = remainder.second;
 				bestEdges.push_back(edgeIndex);
@@ -185,7 +210,7 @@ namespace fuzzy_match_stuff{
  *     - If there are letters before the first match.
  *     - If there are superfluous characters in str (already accounted for).
  */
-int32_t compute_score(int32_t jump, bool first_char, const char * match)
+static int32_t compute_score(int32_t jump, bool first_char, const char * match)
 {
 	const int adjacency_bonus = 15;
 	const int separator_bonus = 30;
@@ -198,28 +223,31 @@ int32_t compute_score(int32_t jump, bool first_char, const char * match)
 	int32_t score = 0;
 
 	/* Apply bonuses. */
-	if (!first_char && jump == 0) {
+	if(!first_char && jump == 0)
+	{
 		score += adjacency_bonus;
 	}
-	if (!first_char || jump > 0) {
-		if (isupper((unsigned char)*match)
-		   && islower((unsigned char)*(match - 1))) {
+	if(!first_char || jump > 0)
+	{
+		if(isupper((unsigned char)*match) && islower((unsigned char)*(match - 1)))
+		{
 			score += camel_bonus;
 		}
-		if (isalnum((unsigned char)*match)
-		   && !isalnum((unsigned char)*(match - 1))) {
+		if(isalnum((unsigned char)*match) && !isalnum((unsigned char)*(match - 1)))
+		{
 			score += separator_bonus;
 		}
 	}
-	if (first_char && jump == 0) {
+	if(first_char && jump == 0)
+	{
 		/* Match at start of string gets separator bonus. */
 		score += first_letter_bonus;
 	}
 
 	/* Apply penalties. */
-	if (first_char) {
-		score += std::max(leading_letter_penalty * jump,
-					 max_leading_letter_penalty);
+	if(first_char)
+	{
+		score += std::max(leading_letter_penalty * jump, max_leading_letter_penalty);
 	}
 
 	return score;
@@ -234,21 +262,26 @@ int32_t compute_score(int32_t jump, bool first_char, const char * match)
  * characters.
  */
 
-int musl_strncasecmp(const char *_l, const char *_r, size_t n)
+static int musl_strncasecmp(const char* _l, const char* _r, size_t n)
 {
-	const unsigned char *l=(unsigned char *)_l, *r=(unsigned char *)_r;
-	if (!n--) return 0;
-	for (; *l && *r && n && (*l == *r || tolower(*l) == tolower(*r)); l++, r++, n--);
+	const unsigned char *l = (unsigned char*)_l;
+	const unsigned char *r = (unsigned char*)_r;
+	if(!n--) return 0;
+	for(; *l && *r && n && (*l == *r || tolower(*l) == tolower(*r));
+		l++, r++, n--)
+	{
+	}
 	return tolower(*l) - tolower(*r);
 }
-char *musl_strcasestr(const char *h, const char *n)
+static char* musl_strcasestr(const char* h, const char* n)
 {
 	size_t l = strlen(n);
-	for (; *h; h++) if (!musl_strncasecmp(h, n, l)) return (char *)h;
+	for(; *h; h++)
+		if(!musl_strncasecmp(h, n, l)) return (char*)h;
 	return 0;
 }
 
-int32_t fuzzy_match_recurse(
+static int32_t fuzzy_match_recurse( // NOLINT(*-no-recursion)
 	const char * pattern,
 	const char * str,
 	int32_t score,
@@ -272,7 +305,7 @@ int32_t fuzzy_match_recurse(
 		int32_t subscore = fuzzy_match_recurse(
 			pattern + 1,
 			match + 1,
-			compute_score(match - str, first_char, match),
+			compute_score(match - str, first_char, match), // NOLINT(*-narrowing-conversions)
 			false);
 		best_score = std::max(best_score, subscore);
 		match++;
@@ -281,9 +314,8 @@ int32_t fuzzy_match_recurse(
 	if (best_score == INT32_MIN) {
 		/* We couldn't match the rest of the pattern. */
 		return INT32_MIN;
-	} else {
-		return score + best_score;
 	}
+	return score + best_score;
 }
 
 } // namespace fuzzy_match_stuff
@@ -291,7 +323,7 @@ int32_t fuzzy_match_recurse(
  * Returns score if each character in pattern is found sequentially within str.
  * Returns INT32_MIN otherwise.
  */
-int32_t fuzzy_match(const char * pattern, const char * str)
+static int32_t fuzzy_match(const char * pattern, const char * str)
 {
 	const int unmatched_letter_penalty = -1;
 	const size_t slen = strlen(str);
@@ -313,6 +345,8 @@ int32_t fuzzy_match(const char * pattern, const char * str)
 
 	return score;
 }
+
+// NOLINTEND(*-readability-casting,*-implicit-bool-conversion)
 
 struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 {
@@ -631,6 +665,7 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 		missing_old_text.erase(rem_it, missing_old_text.end());
 
 		// delete the other pairs that were invalidated.
+		// NOTE: C++20 std::erase simplifies this massively.
 		missing_patches.erase(
 			std::remove(missing_patches.begin(), missing_patches.end(), patch_ast_end),
 			missing_patches.end());

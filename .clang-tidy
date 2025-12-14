@@ -40,6 +40,11 @@ Checks: >
   -*-math-missing-parentheses,
   -*-implicit-widening-of-multiplication-result,
   -*-simplify-boolean-expr,
+  -*-use-std-print,
+  -*-use-ranges,
+  -*-avoid-variadic-functions,
+  -*-easily-swappable-parameters,
+  -*-no-recursion,
 #you must make sure the last THING to ends with a comma!!!
   
 
