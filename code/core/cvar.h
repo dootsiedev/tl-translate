@@ -7,10 +7,11 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 enum class CVAR_T
 {
-	// with the cvar init callback, it's unknown, should never be accessed.
+	// For INIT_CVAR, set before the init callback, should never be accessed.
 	UNKNOWN,
 	// modifying this cvar requires the app to be fully restarted
 	STARTUP,
@@ -21,7 +22,8 @@ enum class CVAR_T
 	RUNTIME,
 	// warn when this setting is attempted to be set
 	DISABLED,
-	// the variable was never meant to be written
+	// the variable was never meant to be written,
+	// mainly for checking build/platform configuration features.
 	READONLY
 	// TODO: I should add a value called GPU_CONTEXT (or something?),
 	//  because many cvars for graphics are cached in GL state (shaders, buffers),
@@ -40,6 +42,18 @@ enum CVAR_CACHE_FLAGS
 	CVAR_CACHE_UI = (1 << 4) | CVAR_CACHE_FONT,
 	CVAR_CACHE_DEMO = (1 << 5),
 	CVAR_CACHE_AUDIO = (1 << 6)
+};
+
+// I was thinking about making this "const V_cond_handler& handler = V_cond_handler()".
+// I could use CRTP, but I should not be calling cond() frequently.
+class V_cond_handler
+{
+public:
+	// warning during startup, printed only once, prints the key, value, message, and usage.
+	// you can also use it to add info to the blame (but it will be shown as a warning).
+	// BUT the `usage` (cvar_comment) should do the job of telling you what values are.
+	virtual void warning(const char* message) {(void)message;};
+	virtual ~V_cond_handler() = default; // not used but needed to suppress warnings
 };
 
 class V_cvar;
@@ -102,7 +116,8 @@ public:
 
 	CVAR_T cvar_type()
 	{
-		if(cvar_get_blame() != nullptr)
+		V_cond_handler empty_handler;
+		if(cvar_get_blame(empty_handler) != nullptr)
 		{
 			return CVAR_T::DISABLED;
 		}
@@ -131,7 +146,7 @@ public:
 
 	// if this cvar is Disabled but cvar_internal_type != disabled (hardcoded),
 	// you can get the cvar responsible for setting disabled.
-	virtual V_cvar* cvar_get_blame() = 0;
+	virtual V_cvar* cvar_get_blame(V_cond_handler& context) = 0;
 
 	NDSERR virtual bool cvar_read(const char* buffer) = 0;
 	virtual std::string cvar_write() = 0;
@@ -203,7 +218,7 @@ NDSERR bool cvar_validate_conditions();
 // this could also help with changing the language (I will never do this for cvars...).
 // this might help with avoiding the macro hell, but this will increase lines of code...
 
-#define INIT_CVAR(key, func) key(#key, func, __FILE__, __LINE__)
+#define INIT_CVAR(key, init_func) key(#key, init_func, __FILE__, __LINE__)
 
 #if 0
 #define INIT_CVAR_FUNC(key, param) void __internal_init_cvar_ ## key(param)
@@ -247,7 +262,7 @@ class cvar_int : public V_cvar
 {
 public:
 	typedef void (*cvar_init_cb_type)(cvar_int& data);
-	typedef V_cvar* (*cvar_cond_cb_type)(int value);
+	typedef V_cvar* (*cvar_cond_cb_type)(int value, V_cond_handler& handler);
 
 	// init_cb is called during load_cvar
 	cvar_init_cb_type init_cb = nullptr;
@@ -261,6 +276,26 @@ public:
 	// save this value on exit/reload because it's a startup value.
 	// the internal data gets replaced with this on commit.
 	int cvar_commit_data = -1234567;
+
+	// the enum part, I want to make a cvar_enum inherit cvar_int,
+	// since this wastes 20 or so bytes
+	// and the number needs to be printed as a string just in case it's a enum...
+	// but separating the types duplicates too much code...
+	// and I bet separet types would create more binary space wasted somehow...
+	struct enum_entry
+	{
+		const char* key;
+		int value;
+		const char* comment;
+		enum_entry(const char* key_, int value_, const char* comment_)
+		: key(key_)
+		, value(value_)
+		, comment(comment_)
+		{
+		}
+	};
+	std::vector<enum_entry> enum_values;
+	std::string enum_usage_comment;
 
 	// you should use REGISTER_CVAR_ to fill in file and line.
 	cvar_int(
@@ -294,23 +329,11 @@ public:
 	// it's better to ignore the return than to use _internal_data or a billion if(){return false}
 	bool set_data(int i SRC_LOC2);
 
-	void cvar_init_values() override
-	{
-		if(cvar_init_once)
-		{
-			return;
-		}
-		cvar_init_once = true;
-		if(init_cb != nullptr)
-		{
-			init_cb(*this);
-		}
-		cvar_default_value = _internal_data;
-		if(internal_cvar_type == CVAR_T::STARTUP)
-		{
-			cvar_commit_data = _internal_data;
-		}
-	}
+	std::string get_enum_or_number(int i);
+
+	void add_enum(const char* key, int value, const char* comment);
+
+	void cvar_init_values() override;
 	bool cvar_revert_to_default(SRC_LOC) override
 	{
 		return set_data(cvar_default_value PASS_SRC_LOC2);
@@ -319,9 +342,9 @@ public:
 	{
 		return _internal_data == cvar_default_value;
 	}
-	V_cvar* cvar_get_blame() override
+	V_cvar* cvar_get_blame(V_cond_handler& handler) override
 	{
-		return cond_cb != nullptr ? cond_cb(_internal_data) : nullptr;
+		return cond_cb != nullptr ? cond_cb(_internal_data, handler) : nullptr;
 	}
 	void cvar_set_commit() override
 	{
@@ -339,7 +362,7 @@ class cvar_double : public V_cvar
 {
 public:
 	typedef void (*cvar_init_cb_type)(cvar_double& data);
-	typedef V_cvar* (*cvar_cond_cb_type)(double& value);
+	typedef V_cvar* (*cvar_cond_cb_type)(double& value, V_cond_handler& handler);
 
 	// init_cb is called during load_cvar
 	cvar_init_cb_type init_cb = nullptr;
@@ -415,9 +438,9 @@ public:
 	{
 		return _internal_data == cvar_default_value;
 	}
-	V_cvar* cvar_get_blame() override
+	V_cvar* cvar_get_blame(V_cond_handler& handler) override
 	{
-		return cond_cb != nullptr ? cond_cb(_internal_data) : nullptr;
+		return cond_cb != nullptr ? cond_cb(_internal_data, handler) : nullptr;
 	}
 	void cvar_set_commit() override
 	{
@@ -435,7 +458,7 @@ class cvar_string : public V_cvar
 {
 public:
 	typedef void (*cvar_init_cb_type)(cvar_string& data);
-	typedef V_cvar* (*cvar_cond_cb_type)(std::string& value);
+	typedef V_cvar* (*cvar_cond_cb_type)(std::string& value, V_cond_handler handler);
 
 	// init_cb is called during load_cvar
 	cvar_init_cb_type init_cb = nullptr;
@@ -514,9 +537,9 @@ public:
 	{
 		return _internal_data == cvar_default_value;
 	}
-	V_cvar* cvar_get_blame() override
+	V_cvar* cvar_get_blame(V_cond_handler& handler) override
 	{
-		return cond_cb != nullptr ? cond_cb(_internal_data) : nullptr;
+		return cond_cb != nullptr ? cond_cb(_internal_data, handler) : nullptr;
 	}
 	void cvar_set_commit() override
 	{

@@ -82,29 +82,50 @@ REGISTER_CVAR_INT(
 	"some stack trace frame may be inlined incorrectly with optimizations, 0 = off, 1 = print all frames",
 	CVAR_T::RUNTIME);
 
+#define BACKTRACE_BACKEND_MAP(XX)               \
+	XX(ALL, -1, "print every backend together") \
+	XX(DEFAULT, 0, "pick default")                 \
+	XX(CPP_STACKTRACE, 1, "c++23 <stacktrace>")    \
+	XX(WIN32_DBGHELP, 2, "dbghelp(windows)")       \
+	XX(LIBBACKTRACE, 3, "libbacktrace (linux)") \
+	XX(LIBBACKTRACE_MINGW, 4, "libbacktrace (linux)")
+
+// LIBBACKTRACE_MINGW
+// instead of using libbacktrace to walk the stack (using libunwind internally)
+// I use RtlCaptureStackBackTrace. Originally I added this to fix TRIM_STACKTRACE.
+// (I fixed TRIM_STACKTRACE with libbacktrace, I added +1 to the address to match g_trim_return_address)
+// but RtlCaptureStackBackTrace is slightly incorrect (maybe I also had to offset -1).
+//
+// LIBBACKTRACE_MINGW should be removed because libbacktrace won't work with USE_LLVM_MINGW_PDB
+// -Xlinker --strip-debug will break libbacktrace function symbol handling
+// which is required since lldb will ignore pdb info... which is probably a bug.
+// but then libc++.dll won't have any symbols.
+// (Release binaries should have symbols, just not source/line info)...
+// so unless you are already building llvm, that is annoying.
+// but if I am building llvm, I think I could use llvm's native pdb symbolizer
+// (But it needs to be cfi sanitizer safe + thread safe for me to want it).
+
 enum class BT_TYPES
 {
-	ALL = -1,
-	DEFAULT = 0,
-	CPP_STACKTRACE = 1,
-	WIN32_DBGHELP = 2,
-	LIBBACKTRACE = 3,
-	// libbacktrace still works with mingw,
-	// but instead of letting libbacktrace walk the stack (using libunwind?)
-	// I use RtlCaptureStackBackTrace.
-	// This fixes TRIM_STACKTRACE (I don't know why), but it also introduces other quirks.
-	LIBBACKTRACE_MINGW = 4
+#define XX(key, value, _) key = value,
+	BACKTRACE_BACKEND_MAP(XX)
+#undef XX
 };
 
 // hacky forward declaration...
-extern cvar_int cv_bt_stacktrace_override;
 static void cvar_init_stacktrace_override(cvar_int& self)
 {
 	self._internal_data = 0;
-	self.cvar_comment =
-		"set which stacktrace to use, 0 = pick default, 1 = c++23 <stacktrace>, 2 = dbghelp, 3 = libbacktrace, -1 = ALL (print redundant stacktrace for comparing)";
+	self.cvar_comment = "set which stacktrace to use";
+	//", 0 = pick default, 1 = c++23 <stacktrace>, 2 = dbghelp(windows), 3 = libbacktrace (linux), -1 = ALL (print every available version)";
 	self.internal_cvar_type = disable_cvar_if_no_stacktrace;
-	self.cond_cb = [](int value) -> V_cvar* {
+
+
+#define XX(key, value, comment) self.add_enum(#key, value, comment);
+	BACKTRACE_BACKEND_MAP(XX)
+#undef XX
+
+	self.cond_cb = [](auto value, V_cond_handler& handler) -> V_cvar* {
 		switch(static_cast<BT_TYPES>(value))
 		{
 		case BT_TYPES::ALL: return nullptr;
@@ -133,11 +154,7 @@ static void cvar_init_stacktrace_override(cvar_int& self)
 				return &cv_has_stacktrace_libbacktrace;
 			}
 #ifndef __MINGW32__
-			slogf(
-				"warning: this option is for libbacktrace mingw %s = %d\nusage: %s\n\n",
-				cv_bt_stacktrace_override.cvar_key,
-				value,
-				cv_bt_stacktrace_override.cvar_comment);
+			handler.warning("this option is for libbacktrace mingw");
 #endif
 			return nullptr;
 		}
@@ -147,17 +164,13 @@ static void cvar_init_stacktrace_override(cvar_int& self)
 		//  and instead of returning the blame, I should use the callback,
 		//  since multiple blames could exist.
 		//  And the blame should also include the location (default, argv, or file)
-		slogf(
-			"warning: unknown value for %s = %d\nusage: %s\n\n",
-			cv_bt_stacktrace_override.cvar_key,
-			value,
-			cv_bt_stacktrace_override.cvar_comment);
+		handler.warning("unknown value");
 		return nullptr;
 	};
 }
 // TODO: since I map this to an enum... why not make this an enum cvar?
 //  raw numbers are pretty bad...
-cvar_int INIT_CVAR(cv_bt_stacktrace_override, cvar_init_stacktrace_override);
+static cvar_int INIT_CVAR(cv_bt_stacktrace_override, cvar_init_stacktrace_override);
 
 // I try to leave 1 frame below, so that at least one frame is from SDL3.dll
 // if more frames would help, I could make a positive number leak more frames in.
@@ -361,7 +374,8 @@ MY_NOINLINE bool write_cpp23_stacktrace(debug_stacktrace_observer& printer, int 
 				{
 					int length = WIN32_getModulePath(frame.native_handle(), nullptr, 0, nullptr);
 					module_path = std::make_unique<char[]>(length + 1);
-					if(WIN32_getModulePath(frame.native_handle(), module_path.get(), length, nullptr) == length)
+					if(WIN32_getModulePath(
+						   frame.native_handle(), module_path.get(), length, nullptr) == length)
 					{
 						module = module_path.get();
 					}

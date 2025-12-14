@@ -33,6 +33,17 @@ std::map<const char*, V_cvar&, cmp_str>& get_convars()
 	return convars;
 }
 
+
+class CondWarning_Handler : public V_cond_handler
+{
+public:
+	std::vector<const char*> warnings;
+	void warning(const char* message) override
+	{
+		warnings.emplace_back(message);
+	}
+};
+
 cvar_int::cvar_int(
 	const char* key,
 	int value,
@@ -70,14 +81,21 @@ bool cvar_int::set_data(int i SRC_LOC2_IMPL)
 		serrf("Error: disabled cvar (hard coded) %s(%d) = %d\n", cvar_key, internal_data(), i);
 		return false;
 	}
-	V_cvar* blame = cond_cb != nullptr ? cond_cb(i) : nullptr;
+	CondWarning_Handler warn_handler;
+	V_cvar* blame = cond_cb != nullptr ? cond_cb(i, warn_handler) : nullptr;
+	// you can have warnings even if the blame is null.
+	for(const char* message : warn_handler.warnings)
+	{
+		// because of enums, I use strings...
+		slogf("warning (%s(%s) = %s): %s\n", cvar_key, cvar_write().c_str(), get_enum_or_number(i).c_str(), message);
+	}
 	if(blame != nullptr)
 	{
 		slogf(
-			"Warning: disabled cvar %s(%d) = %d (blame: %s == %s)\n",
+			"warning: disabled cvar %s(%s) = %s (blame: %s == %s)\n",
 			cvar_key,
-			internal_data(),
-			i,
+			cvar_write().c_str(),
+			get_enum_or_number(i).c_str(),
 			blame->cvar_key,
 			blame->cvar_write().c_str());
 	}
@@ -97,8 +115,66 @@ bool cvar_int::set_data(int i SRC_LOC2_IMPL)
 
 	return true;
 }
+
+std::string cvar_int::get_enum_or_number(int i)
+{
+	for(auto &entry: enum_values)
+	{
+		if(entry.value == i)
+		{
+			return entry.key;
+		}
+	}
+	std::string str;
+	str_asprintf(str, "%d", i);
+	return str;
+}
+
+void cvar_int::add_enum(const char* key, int value, const char* comment)
+{
+#ifndef NDEBUG
+	for(auto& entry : enum_values)
+	{
+		ASSERT_M(stricmp(entry.key, key) != 0, entry.key);
+		ASSERT_M(entry.value != value, entry.key);
+	}
+#endif
+	enum_values.emplace_back(key, value, comment);
+}
+void cvar_int::cvar_init_values()
+{
+	if(cvar_init_once)
+	{
+		return;
+	}
+	cvar_init_once = true;
+	if(init_cb != nullptr)
+	{
+		init_cb(*this);
+	}
+	cvar_default_value = _internal_data;
+	if(internal_cvar_type == CVAR_T::STARTUP)
+	{
+		cvar_commit_data = _internal_data;
+	}
+
+	// enum
+	enum_usage_comment = cvar_comment;
+	for(auto& entry : enum_values)
+	{
+		str_asprintf(enum_usage_comment, "\t-%s: %s", entry.key, entry.comment);
+	}
+	cvar_comment = enum_usage_comment.c_str();
+}
 bool cvar_int::cvar_read(const char* buffer)
 {
+	for(auto entry : enum_values)
+	{
+		if(stricmp(entry.key, buffer) == 0)
+		{
+			return set_data(entry.value);
+		}
+	}
 	char* end_ptr;
 
 	pop_errno_t pop_errno;
@@ -145,9 +221,7 @@ bool cvar_int::cvar_read(const char* buffer)
 }
 std::string cvar_int::cvar_write()
 {
-	std::string str;
-	str_asprintf(str, "%d", internal_data());
-	return str;
+	return get_enum_or_number(internal_data());
 }
 
 cvar_double::cvar_double(
@@ -189,7 +263,13 @@ bool cvar_double::set_data(double i SRC_LOC2_IMPL)
 		serrf("Error: disabled cvar (hard coded) %s(%g) = %g\n", cvar_key, internal_data(), i);
 		return false;
 	}
-	V_cvar* blame = cond_cb != nullptr ? cond_cb(i) : nullptr;
+	CondWarning_Handler warn_handler;
+	V_cvar* blame = cond_cb != nullptr ? cond_cb(i, warn_handler) : nullptr;
+	// you can have warnings even if the blame is null.
+	for(const char* message : warn_handler.warnings)
+	{
+		slogf("warning (%s(%g) = %g): %s\n", cvar_key, internal_data(), i, message);
+	}
 	if(blame != nullptr)
 	{
 		slogf(
@@ -289,7 +369,13 @@ bool cvar_string::set_data(std::string&& str SRC_LOC2_IMPL)
 			str.c_str());
 		return false;
 	}
-	V_cvar* blame = cond_cb != nullptr ? cond_cb(str) : nullptr;
+	CondWarning_Handler warn_handler;
+	V_cvar* blame = cond_cb != nullptr ? cond_cb(str, warn_handler) : nullptr;
+	// you can have warnings even if the blame is null.
+	for(const char* message : warn_handler.warnings)
+	{
+		slogf("warning (%s(\'%s\') = \'%s\'): %s\n", cvar_key, internal_data().c_str(), str.c_str(), message);
+	}
 	if(blame != nullptr)
 	{
 		slogf(
@@ -305,6 +391,7 @@ bool cvar_string::set_data(std::string&& str SRC_LOC2_IMPL)
 		cvar_commit_data = std::move(str);
 		if(cvar_validate_lock)
 		{
+			// TODO: this should be a reference counted copy on modify type thing.
 			_internal_data = cvar_commit_data;
 		}
 	}
@@ -591,10 +678,10 @@ bool cvar_line(CVAR_T flags_req, char* line, bool console)
 template<class Func>
 static bool cvar_parse_file_lines(RWops* infile, Func line_callback)
 {
-	char inbuffer[1000];
+	char inbuffer[5000];
 	BS_ReadStream reader(infile, inbuffer, sizeof(inbuffer));
 
-	char line_buf[1000 + 1];
+	char line_buf[5000 + 1];
 
 	char* pos = line_buf;
 	// the -1 is not necessary because the stream will put null in for you when EOF is reached.
@@ -606,6 +693,7 @@ static bool cvar_parse_file_lines(RWops* infile, Func line_callback)
 		if(*pos == '\n')
 		{
 			*pos = '\0';
+			// this will not eat whitespace
 			if(line_buf[0] == '#' || pos == line_buf)
 			{
 				// comment or empty
@@ -705,9 +793,7 @@ static void write_cvar_to_stream(BS_WriteStream& writer, V_cvar* cvar)
 	{
 		writer.Put('\"');
 	}
-	std::string escaped_string;
-	escape_string(escaped_string, cvar->cvar_write());
-	for(char c : escaped_string)
+	for(char c : escape_string(cvar->cvar_write()))
 	{
 		writer.Put(c);
 	}
@@ -980,6 +1066,8 @@ static int cvar_open_revert_dialog(V_cvar* self)
 	// should I add in Revert w/o save? since revert will change the save file.
 	// having the option to ignore a cvar would be nice too, maybe replace + with '?' or '+?'
 
+	ASSERT(self != nullptr);
+
 	SDL_MessageBoxButtonData msg_buttons[2];
 	memset(&msg_buttons, 0, sizeof(msg_buttons));
 
@@ -1004,14 +1092,31 @@ static int cvar_open_revert_dialog(V_cvar* self)
 	}
 
 	std::string message_text;
+
+	CondWarning_Handler warn_handler;
+	V_cvar* blame = self->cvar_get_blame(warn_handler);
+
+	// you can have warnings even if the blame is null.
+	for(const char* message : warn_handler.warnings)
+	{
+		str_asprintf(message_text, "warning: %s\n",message);
+	}
+
 	if(self->internal_cvar_type == CVAR_T::DISABLED)
 	{
+		if(blame != nullptr)
+		{
+			str_asprintf(
+				message_text, "warning: disabled type and have a blame?!?: %s\n", blame->cvar_key);
+		}
 		str_asprintf(
 			message_text,
 			"Error: Cannot revert due to disabled hard coded cvar\n"
-			"`%s` = %s\n",
+			"`%s` = %s\n"
+			"usage: %s\n",
 			self->cvar_key,
-			self->cvar_write().c_str());
+			self->cvar_write().c_str(),
+			self->cvar_comment);
 
 		serr_raw(message_text.c_str(), message_text.size());
 
@@ -1022,19 +1127,27 @@ static int cvar_open_revert_dialog(V_cvar* self)
 	}
 	else
 	{
-		V_cvar* blame = self->cvar_get_blame();
-		ASSERT_M(blame != nullptr, self->cvar_key);
+		// this should be set because I redundantly already got the blame
+		// so it's either hard disabled or not (disabled by blame).
+		// I think maybe the best simplification would be to merge everything into one function...
+		if(!CHECK_M(blame != nullptr, self->cvar_key))
+		{
+			return CVAR_REPAIR_ERROR;
+		}
+
 		str_asprintf(
 			message_text,
 			"Error: disabled cvar %s = %s\n"
-			"(blame: %s == %s)\n"
+			"reason: %s = %s\n"
+			"usage: %s\n"
 			"\n"
 			"Keep - don't do anything\n"
 			"Revert - set the values to the default\n",
 			self->cvar_key,
 			self->cvar_write().c_str(),
 			blame->cvar_key,
-			blame->cvar_write().c_str());
+			blame->cvar_write().c_str(),
+			self->cvar_comment);
 	}
 
 	msg_data.message = message_text.c_str();
@@ -1062,11 +1175,15 @@ static int cvar_open_revert_dialog(V_cvar* self)
 }
 #endif // DISABLE_SDL
 
-// recursion... my favorite...
-static int recursion_count = 0;
+// recursion...  not great...
+static int g_blame_recursion_count = 0;
 static bool cvar_propagate_blame_defaults(V_cvar* parent)
 {
-	ASSERT_M(recursion_count < 10, parent->cvar_key);
+	if(!CHECK_M(g_blame_recursion_count < 10, parent->cvar_key))
+	{
+		return false;
+	}
+	++g_blame_recursion_count;
 
 #ifdef DISABLE_SDL
 	if(parent->internal_cvar_type == CVAR_T::DISABLED)
@@ -1078,10 +1195,11 @@ static bool cvar_propagate_blame_defaults(V_cvar* parent)
 			parent->cvar_write().c_str());
 		return false;
 	}
-	V_cvar* blame = parent->cvar_get_blame();
+	V_cond_handler empty_handler;
+	V_cvar* blame = parent->cvar_get_blame(empty_handler);
 	slogf(
 		"Error: disabled cvar %s = %s\n"
-		"(blame: %s == %s)\n",
+		"reason: %s = %s\n",
 		parent->cvar_key,
 		parent->cvar_write().c_str(),
 		blame->cvar_key,
@@ -1113,19 +1231,14 @@ static bool cvar_propagate_blame_defaults(V_cvar* parent)
 
 	parent->cvar_save_changes();
 
-	V_cvar* child = parent->cvar_get_blame();
-	for(; child != nullptr; child = parent->cvar_get_blame())
+	V_cond_handler empty_handler;
+	V_cvar* child = parent->cvar_get_blame(empty_handler);
+	for(; child != nullptr; child = parent->cvar_get_blame(empty_handler))
 	{
 		if(!cvar_propagate_blame_defaults(child))
 		{
 			return false;
 		}
-	}
-
-	child = parent->cvar_get_blame();
-	if(!CHECK_M(child == nullptr, child->cvar_key))
-	{
-		return false;
 	}
 
 	return true;
@@ -1142,16 +1255,17 @@ bool cvar_validate_conditions()
 
 		it.second.cvar_validate_lock = true;
 
-		// the condition changed.
-
-		// TODO: check for disabled cvars using the same recursion in cvar_propagate_blame_defaults,
-		//  and ignore in cvar_validate_conditions
+		// disabled values are ignored, or else every disabled value would get a dialog.
 		if(it.second.internal_cvar_type != CVAR_T::DISABLED)
 		{
-			V_cvar* blame = it.second.cvar_get_blame();
+			// I could probably move this into the recursive function.
+			// but I am scared because it's easy to screw this up.
+			V_cond_handler empty_handler;
+			V_cvar* blame = it.second.cvar_get_blame(empty_handler);
 			if(blame != nullptr)
 			{
-				recursion_count = 0;
+				g_blame_recursion_count = 0;
+
 				if(!cvar_propagate_blame_defaults(&it.second))
 				{
 					success = false;

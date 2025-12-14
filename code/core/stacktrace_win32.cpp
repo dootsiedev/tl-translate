@@ -41,9 +41,8 @@ static REGISTER_CVAR_INT(
 // but it's modified to an unrecognizable point.
 
 // dbghelp is dynamically loaded, because it should be optional.
-// because cmake wont copy dbghelp for you (does windows install with dbghelp?).
+// And since this is thread local, this has the added benefit that I don't need to have mutexes.
 #define DBGHELP_DLL "dbghelp.dll"
-
 
 // public functions in dbghelp.dll
 /*
@@ -122,12 +121,11 @@ typedef BOOL(WINAPI* SYMGETLINEFROMINLINECONTEXT)(
 
 struct DBGHELP_CONTEXT
 {
-
 	HMODULE dbghelp_dll;
-	// function pointers, add a _ to the end so StackWalk_
+	// function pointers
 #define XX(name, type) type name##_;
 	DBGHELP_FUNC_MAP(XX)
-	#undef XX
+#undef XX
 };
 
 static thread_local DBGHELP_CONTEXT dbg_ctx;
@@ -157,7 +155,8 @@ __attribute__((no_sanitize("cfi-icall"))) void write_inline_function_detail(
 		int length = WIN32_getModulePath(reinterpret_cast<void*>(address), nullptr, 0, nullptr);
 		module_path = std::make_unique<char[]>(length + 1);
 		// NOLINTNEXTLINE(*-no-int-to-ptr)
-		if(WIN32_getModulePath(reinterpret_cast<void*>(address), module_path.get(), length, nullptr) == length)
+		if(WIN32_getModulePath(
+			   reinterpret_cast<void*>(address), module_path.get(), length, nullptr) == length)
 		{
 			module_name = module_path.get();
 		}
@@ -170,21 +169,18 @@ __attribute__((no_sanitize("cfi-icall"))) void write_inline_function_detail(
 		}
 	}
 
-	struct
-	{
-		SYMBOL_INFO symInfo;
-		char name[4 * 256];
-	} SymInfo = {{sizeof(SymInfo.symInfo)}, ""};
-
-	PSYMBOL_INFO pSym = &SymInfo.symInfo;
-	pSym->MaxNameLen = sizeof(SymInfo.name);
+	ULONG64
+	symbolBuffer[(sizeof(SYMBOL_INFO) + MAX_SYM_NAME + sizeof(ULONG64) - 1) / sizeof(ULONG64)];
+	PSYMBOL_INFO pIHS = (PSYMBOL_INFO)symbolBuffer;
+	pIHS->SizeOfStruct = sizeof(SYMBOL_INFO);
+	pIHS->MaxNameLen = MAX_SYM_NAME;
 
 	// I copied this from
 	// https://github.com/rogerorr/articles/blob/main/Debugging_Optimised_Code/SimpleStackWalker.cpp
 	DWORD64 uDisplacement(0);
-	if(dbg_ctx.SymFromInlineContext_(proc, address, inline_context, &uDisplacement, pSym) != 0)
+	if(dbg_ctx.SymFromInlineContext_(proc, address, inline_context, &uDisplacement, pIHS) != 0)
 	{
-		function = pSym->Name;
+		function = pIHS->Name;
 		LONG_PTR displacement = static_cast<LONG_PTR>(uDisplacement);
 		if(snprintf(
 			   function_buffer,
@@ -199,20 +195,23 @@ __attribute__((no_sanitize("cfi-icall"))) void write_inline_function_detail(
 	}
 
 	// file/line number
-	IMAGEHLP_LINE64 lineInfo = {sizeof(lineInfo)};
+
+	IMAGEHLP_LINE64 ih_line;
+	ih_line.SizeOfStruct = sizeof(IMAGEHLP_LINE);
+
 	// I don't know what's the deal with 2 displacements...
 	// MAYBE this is the relative displacement,
 	// while the above is the displacement from the function.
 	DWORD dwDisplacement(0);
-	if(dbg_ctx.SymGetLineFromInlineContext_(proc, address, inline_context, 0, &dwDisplacement, &lineInfo) !=
-	   0)
+	if(dbg_ctx.SymGetLineFromInlineContext_(
+		   proc, address, inline_context, 0, &dwDisplacement, &ih_line) != 0)
 	{
-		filename = lineInfo.FileName;
+		filename = ih_line.FileName;
 		if(cv_bt_full_paths.data() == 0)
 		{
-			filename = remove_file_path(lineInfo.FileName);
+			filename = remove_file_path(ih_line.FileName);
 		}
-		lineno = lineInfo.LineNumber; // NOLINT(*-narrowing-conversions)
+		lineno = ih_line.LineNumber; // NOLINT(*-narrowing-conversions)
 	}
 
 	debug_stacktrace_info info{nr_of_frame + 1, address, module_name, function, filename, lineno};
@@ -223,7 +222,8 @@ __attribute__((no_sanitize("cfi-icall"))) void write_inline_function_detail(
 
 // mingw but built with -gcodeview + -Wl,--pdb=
 // But it's an optimized build.
-// Normally the pdb file should have source + line info which avoids the itanium ABI mangling (somehow)
+// Normally the pdb file should have source + line info which avoids the itanium ABI mangling
+// (somehow)
 #ifdef __GNUG__
 #include <cxxabi.h>
 #endif
@@ -256,7 +256,8 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 		int length = WIN32_getModulePath(reinterpret_cast<void*>(address), nullptr, 0, nullptr);
 		module_path = std::make_unique<char[]>(length + 1);
 		// NOLINTNEXTLINE(*-no-int-to-ptr)
-		if(WIN32_getModulePath(reinterpret_cast<void*>(address), module_path.get(), length, nullptr) == length)
+		if(WIN32_getModulePath(
+			   reinterpret_cast<void*>(address), module_path.get(), length, nullptr) == length)
 		{
 			module_name = module_path.get();
 		}
@@ -342,7 +343,6 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 				}
 			}
 		}
-
 
 		/*char undecorate_buffer[500];//=_T("?");
 
@@ -486,7 +486,6 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 			break;
 		}
 
-
 		DWORD64 pc = stack_frame.AddrPC.Offset;
 
 		if(!if_skip(i, pc))
@@ -539,8 +538,8 @@ __attribute__((no_sanitize("cfi-icall"))) static bool
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
 #endif
 #define XX(name, type)                                                                           \
-	dbg_ctx.name##_ = (type)GetProcAddress(dbg_ctx.dbghelp_dll, #name);                                          \
-	if(dbg_ctx.name##_ == nullptr)                                                                       \
+	dbg_ctx.name##_ = (type)GetProcAddress(dbg_ctx.dbghelp_dll, #name);                          \
+	if(dbg_ctx.name##_ == nullptr)                                                               \
 	{                                                                                            \
 		printer.print_string_fmt(                                                                \
 			"failed to load %s in %s: %s\n", #name, DBGHELP_DLL, WIN_GetFormattedGLE().c_str()); \

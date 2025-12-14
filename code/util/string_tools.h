@@ -78,7 +78,14 @@ inline void str_vasprintf(std::string& out, const char* fmt, va_list args)
 		ret = vsnprintf(p + offset, ret + 1, fmt, args);
 #endif
 		if(ret == -1) return offset;
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wsign-compare"
+#endif
 		assert(ret == n - offset - 1 && "this should be true because of the null terminator.");
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 		assert(ret == expected_ret);
 		return n - 1;
 	});
@@ -222,7 +229,7 @@ NDSERR inline bool rem_escape_string(char* input_string)
 }
 
 // a lazy version, that always makes a string
-NDSERR inline std::string escape_string(std::string_view input_string)
+inline std::string escape_string(std::string_view input_string)
 {
 	std::string output_string;
 	// pretty much all my log strings have a newline, so I add a +1
@@ -253,11 +260,13 @@ NDSERR inline std::string escape_string(std::string_view input_string)
 			// if it is a control code.
 			if(c >= 0 && c <= 0x001f)
 			{
-				str_asprintf(output_string, "\\(U+%04d)", c);
+				// TODO: escape it?
+				str_asprintf(output_string, "(%02d)", c);
+				/*
 				serrf(
 					"got a unexpected control code, got: #%d, offset: %zu\n",
 					c,
-					std::distance(input_string.begin(), it));
+					std::distance(input_string.begin(), it));*/
 			}
 			output_string.push_back(c);
 		}

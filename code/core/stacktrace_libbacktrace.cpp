@@ -42,7 +42,6 @@ REGISTER_CVAR_INT(
 #include <cxxabi.h>
 #endif
 
-
 enum
 {
 	BT_EARLY_EXIT_RETURN = 123456
@@ -241,7 +240,7 @@ struct bt_payload
 		}
 #else
 #ifdef USE_WIN32_DEBUG_INFO
-		// if you have USE_MINGW_PDB
+		// if you have USE_LLVM_MINGW_PDB
 		if(function == NULL)
 		{
 			// This will work, if you have both dwarf and -gcodeview data.

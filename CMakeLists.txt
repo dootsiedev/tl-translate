@@ -638,11 +638,24 @@ if(MY_CLANG_CL)
     target_compile_options(MY_OPTIONS_FLAGS INTERFACE -fansi-escape-codes -fcolor-diagnostics)
 endif()
 
+# pdb files on mingw work surprisingly well, similar stacktrace results as clang-cl
+# one of the problems with mingw is that Release won't give stacktraces for lldb / llvm-symbolizer / libbacktrace (libunwind),
+# Unlike linux Release (but it would not include source/line info).
+# For an optimized build, msvc tools (like windbg) has buggy stack traces (lldb/etc will print it correctly).
+# I think the buggy stack trace is because of the itanium ABI.
 if(MINGW)
-    option(USE_MINGW_PDB "make mingw use codeview pdb files" OFF)
-    if(USE_MINGW_PDB)
-        target_compile_options(MY_OPTIONS_FLAGS INTERFACE -gcodeview)
-        target_link_options(MY_OPTIONS_FLAGS INTERFACE -Xlinker --strip-debug -Wl,--pdb=)
+    option(USE_LLVM_MINGW_PDB "make mingw use codeview pdb files" OFF)
+    if(USE_LLVM_MINGW_PDB)
+        # -gcodeview will still include some sort of debug info required for libunwind stacktraces (libbacktrace).
+        # and that info will break lldb (only prints mingw symbols)
+        # you need to add the flag -Xlinker --strip-debug, which will not affect the pdb (llvm-strip also works)
+        # BUT libunwind(libbacktrace) can't get addresses from mingw DLL's (mixing DLL's is not good however)
+        # I was able to use libunwind to grab a stacktrace and print it with dbghelp.
+        if(USE_LIBBACKTRACE)
+            message(WARNING "USE_LLVM_MINGW_PDB does not work with USE_LIBBACKTRACE")
+        endif()
+        target_compile_options(ALL_SANITIZERS INTERFACE -gcodeview)
+        target_link_options(ALL_SANITIZERS INTERFACE -Xlinker --strip-debug -Wl,--pdb=)
     endif()
 endif()
 

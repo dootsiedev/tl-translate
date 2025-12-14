@@ -585,7 +585,6 @@ bool translation_context::translation_table::validate_translation(const char* la
 		slogf("warning: missing translations (count: %zu): %s\n", missing_count, lang_file);
 		size_t found_count = 0;
 
-		std::string escaped_string;
 		for(auto it = translations.begin(); it != translations.end(); ++it)
 		{
 			// this is the error string placeholder
@@ -600,9 +599,7 @@ bool translation_context::translation_table::validate_translation(const char* la
 				++found_count;
 				const char* key = get_index_key(index);
 
-				escaped_string.clear();
-				escape_string(escaped_string, key);
-				slogf("- \"%s\"\n", escaped_string.c_str());
+				slogf("- \"%s\"\n", escape_string(key).c_str());
 				// set_index(index, key);
 			}
 		}

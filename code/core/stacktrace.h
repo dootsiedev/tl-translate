@@ -23,7 +23,7 @@ extern cvar_int cv_has_stacktrace_dbghelp;
  */
 int WIN32_getModulePath(void* address, char* out, int capacity, int* dirname_length);
 // I could add in WIN32_getProgramPath if I needed it.
-//int WIN32_getModulePath_(HMODULE* hmodule, char* out, int capacity, int* dirname_length);
+// int WIN32_getModulePath_(HMODULE* hmodule, char* out, int capacity, int* dirname_length);
 #endif
 
 #if defined(__EMSCRIPTEN__)

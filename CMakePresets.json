@@ -158,7 +158,7 @@
         "CMAKE_TOOLCHAIN_FILE": "$env{MY_VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "USE_WIN32_DEBUG_INFO": true,
         "USE_LIBBACKTRACE": false,
-        "USE_MINGW_PDB": true
+        "USE_LLVM_MINGW_PDB": true
       }
     },
     {
