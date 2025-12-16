@@ -26,10 +26,10 @@
 		fprintf(stderr, fmt, __VA_ARGS__); \
 	} while(0)
 #endif
-// I don't want slog because I want to use stdout for formatted output,
+// (*nevermind) I don't want slog because I want to use stdout for formatted output,
 // so any accidental leaks to stdout can corrupt the output
 // I could replace slog with OutputDebugStringA, but I don't know what to do for linux.
-#if 0
+#if 1
 #ifndef slog
 #define slog(msg) fputs(msg, stdout)
 #endif

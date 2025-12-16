@@ -56,87 +56,6 @@ std::wstring WIN_UTF8ToWide(const char* buffer, int size);
 	 a}
 #endif
 
-struct nocopy
-{
-	nocopy() = default;
-	nocopy(const nocopy&) = delete;
-	nocopy& operator=(const nocopy&) = delete;
-};
-
-// preserve the original value of errno.
-struct pop_errno_t
-{
-	int old_errno;
-	pop_errno_t()
-	: old_errno(errno)
-	{
-		errno = 0;
-	}
-	~pop_errno_t()
-	{
-		errno = old_errno;
-	}
-};
-
-// I need this because it is more robust to not use a template<> for the resolution,
-// but I have no idea how to remove the template for chrono.
-#define timer_delta_ms(start, end) timer_delta<1000>(start, end)
-#define timer_delta_sec(start, end) timer_delta<1>(start, end)
-
-typedef double TIMER_RESULT;
-#define TIMER_FMT "f"
-
-typedef double TIMER_RESULT;
-
-// use chrono or SDL's QPC
-// but QPC's shouldn't be used if timers from other threads are compared.
-// you can also try clang's __builtin_readcyclecounter
-// if you are measuring really tiny calculations.
-#ifndef USE_SDL2_QPC_TIMER
-
-#include <chrono>
-
-#define TIMER_NULL \
-	std::chrono::steady_clock::time_point {}
-
-typedef std::chrono::steady_clock::time_point TIMER_U;
-
-inline TIMER_U timer_now()
-{
-	return std::chrono::steady_clock::now();
-}
-
-// resolution is based on how much to divide 1 seconds
-// 1 = print in seconds, 1000 = print in milliseconds
-template<intmax_t resolution>
-TIMER_RESULT timer_delta(TIMER_U start, TIMER_U end)
-{
-	typedef std::chrono::duration<TIMER_RESULT, std::ratio<1, resolution>> duration_type;
-	return std::chrono::duration_cast<duration_type>(end - start).count();
-}
-
-#else
-
-typedef Uint64 TIMER_U;
-
-#define TIMER_NULL 0
-
-inline TIMER_U timer_now()
-{
-	return SDL_GetPerformanceCounter();
-}
-
-// resolution is based on how much to divide 1 seconds
-// 1 = print in seconds, 1000 = print in milliseconds
-template<Uint64 resolution>
-inline TIMER_RESULT timer_delta(TIMER_U start, TIMER_U end)
-{
-	Uint64 frequency = SDL_GetPerformanceFrequency();
-	return static_cast<TIMER_RESULT>((end - start) * resolution) /
-		   static_cast<TIMER_RESULT>(frequency);
-}
-#endif
-
 // the main purpose of this logging system is
 // to redirect the logs into both stdout and a log file,
 // and for being a thread safe logging system,
@@ -177,4 +96,87 @@ MY_NOINLINE void serr(const char* msg);
 
 void slogf(MY_MSVC_PRINTF const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 MY_NOINLINE void serrf(MY_MSVC_PRINTF const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+#endif
+
+struct nocopy
+{
+	nocopy() = default;
+	nocopy(const nocopy&) = delete;
+	nocopy& operator=(const nocopy&) = delete;
+};
+
+// preserve the original value of errno.
+struct pop_errno_t
+{
+	int old_errno;
+	pop_errno_t()
+	: old_errno(errno)
+	{
+		errno = 0;
+	}
+	~pop_errno_t()
+	{
+		errno = old_errno;
+	}
+};
+
+// timer should be it's own header
+
+// I need this because it is more robust to not use a template<> for the resolution,
+// but I have no idea how to remove the template for chrono.
+#define timer_delta_ms(start, end) timer_delta<1000>(start, end)
+#define timer_delta_sec(start, end) timer_delta<1>(start, end)
+
+typedef double TIMER_RESULT;
+#define TIMER_FMT "f"
+
+typedef double TIMER_RESULT;
+
+// use chrono or SDL's QPC
+// but QPC's shouldn't be used if timers from other threads are compared.
+// you can also try clang's __builtin_readcyclecounter
+// if you are measuring really tiny calculations.
+#ifndef USE_SDL2_QPC_TIMER
+
+#include <chrono>
+
+#define TIMER_NULL \
+std::chrono::steady_clock::time_point {}
+
+typedef std::chrono::steady_clock::time_point TIMER_U;
+
+inline TIMER_U timer_now()
+{
+	return std::chrono::steady_clock::now();
+}
+
+// resolution is based on how much to divide 1 seconds
+// 1 = print in seconds, 1000 = print in milliseconds
+template<intmax_t resolution>
+TIMER_RESULT timer_delta(TIMER_U start, TIMER_U end)
+{
+	typedef std::chrono::duration<TIMER_RESULT, std::ratio<1, resolution>> duration_type;
+	return std::chrono::duration_cast<duration_type>(end - start).count();
+}
+
+#else
+
+typedef Uint64 TIMER_U;
+
+#define TIMER_NULL 0
+
+inline TIMER_U timer_now()
+{
+	return SDL_GetPerformanceCounter();
+}
+
+// resolution is based on how much to divide 1 seconds
+// 1 = print in seconds, 1000 = print in milliseconds
+template<Uint64 resolution>
+inline TIMER_RESULT timer_delta(TIMER_U start, TIMER_U end)
+{
+	Uint64 frequency = SDL_GetPerformanceFrequency();
+	return static_cast<TIMER_RESULT>((end - start) * resolution) /
+		   static_cast<TIMER_RESULT>(frequency);
+}
 #endif

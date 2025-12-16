@@ -305,7 +305,7 @@ __attribute__((no_sanitize("cfi-icall"))) static void
 				// mangling rules.\n");
 				break;
 			case -3:
-				printer.print_string("abi::__cxa_demangle(-3_: One of the arguments is invalid.\n");
+				printer.print_string("abi::__cxa_demangle(-3_): One of the arguments is invalid.\n");
 				break;
 			default: printer.print_string_fmt("abi::__cxa_demangle(%d): unknown status.\n", status);
 			}
@@ -578,13 +578,17 @@ __attribute__((no_sanitize("cfi-icall"))) static bool
 	return true;
 
 cleanup:
-	if(dbg_ctx.dbghelp_dll) FreeLibrary(dbg_ctx.dbghelp_dll);
+	if(dbg_ctx.dbghelp_dll != NULL)
+	{
+		FreeLibrary(dbg_ctx.dbghelp_dll);
+		dbg_ctx.dbghelp_dll = NULL;
+	}
 
 	return false;
 }
 
 // Cleanup the dbghelp.dll library
-__attribute__((no_sanitize("cfi-icall"))) static void cleanup_debughlp()
+__attribute__((no_sanitize("cfi-icall"))) static void cleanup_debughelp()
 {
 	dbg_ctx.SymCleanup_(GetCurrentProcess());
 
@@ -626,7 +630,7 @@ __declspec(noinline) bool
 	bool ret = true;
 	write_stacktrace(static_cast<CONTEXT*>(ctx), printer, skip);
 
-	cleanup_debughlp();
+	cleanup_debughelp();
 
 	return ret;
 }
@@ -662,7 +666,7 @@ bool debug_win32_write_function_detail(uintptr_t stack_frame, debug_stacktrace_o
 		}
 	}
 #endif
-	cleanup_debughlp();
+	cleanup_debughelp();
 	return true;
 }
 

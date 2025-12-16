@@ -15,14 +15,30 @@ add_executable(merge-strings
         $<$<BOOL:${WIN32}>:../../translate.manifest>
 
         main.cpp
+        uv_helper.cpp
+        uv_helper.h
 
         ../../code/util/utf8_stuff.h
         ../../code/util/utf8_stuff.cpp
 )
-target_link_libraries(merge-strings TL_PARSER)
 target_compile_definitions(merge-strings PUBLIC MY_DISABLE_GLOBAL_DEP TL_ENABLE_FORMAT)
 target_include_directories(merge-strings SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/cxxopts")
 
+find_package(flatbuffers CONFIG REQUIRED)
+# The flatc executable path can then be accessed, often via a variable like FLATBUFFERS_FLATC_EXECUTABLE or similar target properties.
+
+find_program(FLATC_EXECUTABLE NAMES flatc
+        PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/tools/flatbuffers"
+        # I don't know why, but flatc will be built and installed into x64-windows when I use x64-mingw-dynamic...
+        $<$<BOOL:${WIN32}>:"${VCPKG_INSTALLED_DIR}/x64-windows/tools/flatbuffers">
+        NO_DEFAULT_PATH REQUIRED)
+
+add_custom_command(
+        OUTPUT ${FBS_OUTPUT}
+        COMMAND ${FLATC_EXECUTABLE}  > ${FBS_OUTPUT}
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/data/unifont-full.hex.bz2"
+        COMMENT "compiling with flatc"
+)
 
 enable_testing() # Enable CTest
 add_test(NAME MyTest COMMAND merge-strings
@@ -119,6 +135,8 @@ if(ENABLE_AI)
                     "use AI_PYTHON_DIR to create a venv folder if you want a to install FlagEmbedding in cmake")
         endif()
     endif()
+
+    # what difference does PYTHONDONTWRITEBYTECODE=1 make? I should enable it for a CI runner.
     add_test(NAME AI_Test COMMAND ${CMAKE_COMMAND} -E env HF_HUB_CACHE=${AI_CACHE_DIR} --
             ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/BGE-m3-Embedding.py)
 endif()

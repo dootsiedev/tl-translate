@@ -41,7 +41,7 @@
 // this is a hack to avoid making this file include global.h
 // so I could include this file in a project without global.h
 
-#include "core/global.h"
+//#include "core/global.h"
 
 #include "util/string_tools.h"
 #include "util/utf8_stuff.h"
@@ -854,7 +854,9 @@ bool parse_translation_file(
 			utf8::internal::validate_next(str_cur, str_end, codepoint);
 		if(err_code != utf8::internal::UTF8_OK)
 		{
-			serrf("error: %s:%d bad utf8: %s\n", path_name, line_num, utf8cpp_get_error(err_code));
+			std::string err;
+			str_asprintf(err,"error: %s:%d bad utf8: %s\n", path_name, line_num, utf8cpp_get_error(err_code));
+			o.on_error(err.c_str());
 			return false;
 		}
 		if(codepoint == '\n')

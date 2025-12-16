@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../global.h"
+#include "../core/global.h"
 
 // basically a copy of doom 3's idLinkList
 // (AHH GPL NOOO!) I could use EA's EASTL intrusive_list if I needed

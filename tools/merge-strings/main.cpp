@@ -1,12 +1,13 @@
 // This is an independent project of an individual developer. Dear PVS-Studio, please check it.
 // PVS-Studio Static Code Analyzer for C, C++, C#, and Java: https://pvs-studio.com
-// this is GROSS, but I don't want to copy it so it's better than nothing...
+
 #include "../../code/translation_parser.h"
 #include "../../code/util/string_tools.h"
 
 // I should probably globally disable these.
-// NOLINTBEGIN(*-container-contains, *-unnecessary-value-param, *-for-range-copy)
+// NOLINTBEGIN(*-unnecessary-value-param, *-for-range-copy)
 
+#if 1
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -46,7 +47,7 @@ __attribute__((format(printf, 1, 2))) static void infof(MY_MSVC_PRINTF const cha
 #define infof(fmt, ...)
 #endif
 
-
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -126,8 +127,6 @@ struct entry_ast
 	{
 	}
 };
-
-// NOLINTBEGIN(*-readability-casting,*-implicit-bool-conversion)
 
 // TODO: replace with hungarian method
 //  https://github.com/jamespayor/weighted-bipartite-perfect-matching/blob/master/test.cpp
@@ -340,8 +339,7 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 	}
 
 	// this is for merging key to key.
-	bool check_printf(
-		c_ast_iter missing_patch, ast_iter missing_old_text) // NOLINT(*-unnecessary-value-param)
+	bool check_printf(c_ast_iter missing_patch, ast_iter missing_old_text)
 	{
 		ASSERT(!is_patch_file());
 		ASSERT(missing_patch->format_text);
@@ -362,7 +360,7 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 
 	// This is messy, not too happy about it.
 	template<class T>
-	static std::vector<T> find_missing(std::vector<entry_ast>& to, std::vector<entry_ast>& from, bool merge_to)
+	static std::vector<T> find_missing(std::vector<entry_ast>& to, std::vector<entry_ast>& from, bool overwrite_extra)
 	{
 		std::vector<T> missing;
 		for(auto it = from.begin(); it != from.end(); ++it)
@@ -372,7 +370,7 @@ struct load_ast_handler : public tl_parse_observer, public tl_parse_state
 			});
 			if(find_it != to.end())
 			{
-				if(merge_to)
+				if(overwrite_extra)
 				{
 					find_it->extra.clear();
 					find_it->extra.insert(find_it->extra.end(), it->extra.begin(), it->extra.end());
@@ -746,27 +744,48 @@ static bool slurp_file(std::string& out, const char* path)
 	return success;
 }
 
+#define ARGS_FLAGS_MAP(XX)                                                                   \
+	XX(PATCH, "patch", 1, "input file to patch/merge files, required")                       \
+	XX(LANG_DIR, "lang-dir", 1, "relative path to the translation files")                    \
+	XX(STAGE_DIR, "stage-dir", 1, "write merged files into a folder instead of overwriting") \
+	XX(TOOL, "tool", 1, "one of [manual, python, openrouter]")                               \
+	XX(WERROR, "werror", 0, "warnings return errors and won't write files")
+
+struct flag_entry
+{
+	const char* flag;
+	const char* comment;
+	// this will be != nullptr if expect = 0
+	const char* result;
+};
+#define XX(label, flag, _, comment) static flag_entry FLAG_##label{flag, comment, nullptr};
+ARGS_FLAGS_MAP(XX)
+#undef XX
+
+#define FLAG_filenames_flag "filenames"
+#define FLAG_filenames_comment "the list of files to apply the patch to, note that you must put flags before --filenames"
+static std::vector<const char*> FLAG_filenames_files;
+
+
 // it still uses exceptions, but now instead it will print an error then abort.
 //#define CXXOPTS_NO_EXCEPTIONS
-#include <cxxopts.hpp>
+//#include <cxxopts.hpp>
 
-static cxxopts::Options options("test", "A brief description");
-static cxxopts::ParseResult res;
+//static cxxopts::Options options("test", "A brief description");
+//static cxxopts::ParseResult res;
 
 static bool load_translation_ast()
 {
-	if(res.count("patch") == 0)
+	if(FLAG_PATCH.result == nullptr)
 	{
 		serr("error: --patch not defined\n");
 		return false;
 	}
 
-	std::string merge_patch = res["patch"].as<std::string>();
-
 	load_ast_handler patch_ast;
 
-	infof("info: loading patch: %s\n", merge_patch.c_str());
-	if(!slurp_file(patch_ast.file_data, merge_patch.c_str()))
+	infof("info: loading patch: %s\n", FLAG_PATCH.result);
+	if(!slurp_file(patch_ast.file_data, FLAG_PATCH.result))
 	{
 		return false;
 	}
@@ -776,7 +795,7 @@ static bool load_translation_ast()
 	// merge_apply_patch_handler after_patch;
 	// after_patch.patch_root = std::move(patch.ast_root);
 
-	if(!parse_translation_file(patch_ast, patch_ast.file_data, merge_patch.c_str()))
+	if(!parse_translation_file(patch_ast, patch_ast.file_data, FLAG_PATCH.result))
 	{
 		return false;
 	}
@@ -790,75 +809,70 @@ static bool load_translation_ast()
 		return false;
 	}
 
-	std::vector<std::string> merge_files = res["filenames"].as<std::vector<std::string>>();
-
-	if(merge_files.empty())
+	if(FLAG_LANG_DIR.result != nullptr)
 	{
-		serr("expected files, none provided\n");
-		return false;
-	}
-
-	std::optional<std::string> lang_directory;
-	if(res.count("lang-dir") != 0)
-	{
-		lang_directory = res["lang-dir"].as<std::string>();
-		const char* dir_path = lang_directory->c_str();
+		const char* dir_path = FLAG_LANG_DIR.result;
 		struct stat sb;
 		if(stat(dir_path, &sb) == 0)
 		{
 			if(!S_ISDIR(sb.st_mode))
 			{
-				serrf("error: --lang-dir '%s' is not a directory.\n", dir_path);
+				serrf("error: --%s '%s' is not a directory.\n", FLAG_LANG_DIR.flag ,dir_path);
 				return false;
 			}
 		}
 		else
 		{
-			serrf("error: --lang-dir '%s': %s\n", dir_path, strerror(errno));
+			serrf("error: --%s '%s': %s\n", FLAG_LANG_DIR.flag, dir_path, strerror(errno));
 			return false;
 		}
 	}
 
 	std::optional<std::string> stage_directory;
-	if(res.count("stage_dir") != 0)
+	if(FLAG_STAGE_DIR.result != nullptr)
 	{
-		stage_directory = res["stage_dir"].as<std::string>();
 		const char* dir_path = stage_directory->c_str();
 		struct stat sb;
 		if(stat(dir_path, &sb) == 0)
 		{
 			if(!S_ISDIR(sb.st_mode))
 			{
-				serrf("error: --stage_dir '%s' is not a directory.\n", dir_path);
+				serrf("error: --%s '%s' is not a directory.\n", FLAG_STAGE_DIR.flag, dir_path);
 				return false;
 			}
 		}
 		else
 		{
-			serrf("error: --stage_dir '%s': %s\n", dir_path, strerror(errno));
+			serrf("error: --%s '%s': %s\n", dir_path, FLAG_STAGE_DIR.flag, strerror(errno));
 			return false;
 		}
 	}
 
-	for(auto& path : merge_files)
+	// sanity check, should already be checked
+	if(FLAG_filenames_files.empty())
+	{
+		serr("expected files, none provided\n");
+		return false;
+	}
+	for(auto path : FLAG_filenames_files)
 	{
 		// TODO: I could use the log, since I just use the positional variables...
-		infof("info: loading: %s\n", path.c_str());
+		infof("info: loading: %s\n", path);
 
 		load_ast_handler ast;
 		ast.patch_file = &patch_ast;
 
 		{
-			FILE* to_fp = fopen(path.c_str(), "rb");
+			FILE* to_fp = fopen(path, "rb");
 
 			if(to_fp == NULL)
 			{
-				serrf("error: failed to open: `%s`, reason: %s\n", path.c_str(), strerror(errno));
+				serrf("error: failed to open: `%s`, reason: %s\n", path, strerror(errno));
 				return false;
 			}
 
 			// copy the file into the string
-			if(!slurp_stdio(ast.file_data, to_fp, path.c_str()))
+			if(!slurp_stdio(ast.file_data, to_fp, path))
 			{
 				fclose(to_fp);
 				return false;
@@ -871,7 +885,7 @@ static bool load_translation_ast()
 		// merge_apply_patch_handler after_patch;
 		// after_patch.patch_root = std::move(patch.ast_root);
 
-		if(!parse_translation_file(ast, ast.file_data, path.c_str()))
+		if(!parse_translation_file(ast, ast.file_data, path))
 		{
 			return false;
 		}
@@ -894,42 +908,168 @@ static bool load_translation_ast()
 	return true;
 }
 
+
+enum class START_RET{
+	SUCCESS,
+	FAILURE,
+	EXIT
+};
+
+static START_RET startup(int argc, char** argv)
+{
+	bool success = true;
+
+	const char* prog_name = NULL;
+	if(argc >= 1)
+	{
+		// skip the first program name
+		prog_name = argv[0];
+		--argc;
+		++argv;
+	}
+#if 0
+
+	const char* path = "cvar.cfg";
+	FILE* fp = fopen(path, "rb");
+	if(fp == NULL)
+	{
+		// not existing is not an error (maybe make an info log?)
+		// ENOENT = No such file or directory
+		if(errno != ENOENT)
+		{
+			serrf("Failed to open: `%s`, reason: %s\n", path, strerror(errno));
+			success = false;
+		}
+	}
+	else
+	{
+		slogf("info: found cvar file: %s\n", path);
+		RWops_Stdio fp_raii(fp, path);
+		if(!cvar_file(CVAR_T::STARTUP, &fp_raii))
+		{
+			success = false;
+		}
+		if(!fp_raii.close())
+		{
+			success = false;
+		}
+		slogf("info: done reading cvar file.\n");
+	}
+#endif
+	// load cvar arguments after I load the cvar file
+	// I probably shouldn't so the --help output could be cleaner,
+	// but it doesn't matter much.
+	bool filenames_parsing = false;
+	for(int i = 0; i < argc; ++i)
+	{
+		if(filenames_parsing)
+		{
+			struct stat sb;
+			if(stat(argv[i], &sb) == 0)
+			{
+				if(!S_ISDIR(sb.st_mode))
+				{
+					serrf("error: --%s '%s' is not a directory.\n", FLAG_filenames_flag, argv[i]);
+					return START_RET::FAILURE;
+				}
+			}
+			else
+			{
+				serrf("error: --%s '%s': %s\n", FLAG_filenames_flag, argv[i], strerror(errno));
+				return START_RET::FAILURE;
+			}
+			FLAG_filenames_files.push_back(argv[i]);
+			continue;
+		}
+		if(strcmp(argv[i], "--help") == 0)
+		{
+#if 0
+			const char* usage_message = "Usage: %s [--options] [+cv_option \"0\"]\n"
+										"\t--help\tshow this usage message\n"
+										"\t--list-cvars\tlist all cv vars options\n"
+										"\tnote that you must put cvars after options\n";
+			slogf(usage_message, (prog_name != NULL ? prog_name : "prog_name"));
+#else
+			slogf("Usage: %s [--options] --filenames [files...]\n", (prog_name != NULL ? prog_name : "prog_name"));
+			slog("\t--help\tshow this usage message\n");
+			slogf("\t--%s\t%s\n", FLAG_filenames_flag, FLAG_filenames_comment);
+#define XX(_, flag, _2, comment) slogf("\t--%s\t%s\n", flag, comment);
+ARGS_FLAGS_MAP(XX)
+#undef XX
+#endif
+			return START_RET::EXIT;
+		}
+		if(strcmp(argv[i], "--" FLAG_filenames_flag) == 0)
+		{
+			filenames_parsing = true;
+			continue;
+		}
+
+#define XX(label, flag, expect, _)                            \
+	if(strcmp(argv[i], "--" flag) == 0)                       \
+	{                                                         \
+		if(expect == 0)                                       \
+		{                                                     \
+			FLAG_##label.result = argv[i];                    \
+			continue;                                         \
+		}                                                     \
+		if(i + 1 >= argc)                                     \
+		{                                                     \
+			serrf("ERROR: expected argument: %s\n", argv[i]); \
+			return START_RET::FAILURE;                        \
+		}                                                     \
+		++i;                                                  \
+		FLAG_##label.result = argv[i];                        \
+		continue;                                             \
+	}
+		ARGS_FLAGS_MAP(XX)
+#undef XX
+#if 0
+		if(strcmp(argv[i], "--list-cvars") == 0)
+		{
+			cvar_list(false);
+			return START_RET::EXIT;
+		}
+		if(strcmp(argv[i], "--list-cvars-debug") == 0)
+		{
+			cvar_list(true);
+			return START_RET::EXIT;
+		}
+		if(argv[i][0] == '+')
+		{
+			int ret = cvar_arg(CVAR_T::STARTUP, argc - i, argv + i);
+			if(ret == -1)
+			{
+				success = false;
+			}
+			argc -= ret;
+			argv += ret;
+			continue;
+		}
+#endif
+
+		serrf("ERROR: unknown argument: %s\n", argv[i]);
+			return START_RET::EXIT;
+	}
+	if(!filenames_parsing)
+	{
+		serrf("ERROR: --%s required!\n", FLAG_filenames_flag);
+			return START_RET::EXIT;
+	}
+	if(FLAG_filenames_files.empty())
+	{
+		serrf("ERROR: --%s missing files!\n", FLAG_filenames_flag);
+		return START_RET::EXIT;
+	}
+}
+
 int main(int argc, char** argv)
 {
-	// Maybe I could add a flag to strip INFO? Remove Extra Newlines?
-	// clang-format off
-	options.add_options()
-		("p,patch", "input file to patch/merge files, required", cxxopts::value<std::string>())
-		("lang-dir", "relative path to the translation files", cxxopts::value<std::string>())
-		("stage-dir", "write merged files into a folder instead of overwriting", cxxopts::value<std::string>())
-		("filenames", "the list of files to apply the patch to", cxxopts::value<std::vector<std::string>>())
-		("werror", "warnings return errors and won't write files")
-		("tool", "one of [auto,rollback,json,tty]\n"
-			"\tauto = merge with very basic rules (this will not fuzzy match)\n"
-			"\tjson = use a json format for stdout/stdin for AI fuzzy matching\n"
-			// originally I was thinking about using QT for manually merging mismatches...
-			"\ttty = use a terminal to merge (will this work in an IDE?)", cxxopts::value<std::string>()->default_value("auto"))
-		("h,help", "Print usage");
-	// clang-format on
-
-	options.parse_positional({"filenames"});
-
-	res = options.parse(argc, argv);
-
-	if(res.count("help") != 0)
+	switch(startup(argc, argv))
 	{
-		printf("%s\n", options.help().c_str());
-		return 0;
-	}
-
-	if(res.count("werror") != 0)
-	{
-		g_use_werror = true;
-	}
-
-	if(res.count("tool") > 1)
-	{
-		werrf("--tool called more than once = %zu\n", res.count("tool"));
+	case START_RET::SUCCESS: break;
+	case START_RET::FAILURE: return 1;
+	case START_RET::EXIT: return 0;
 	}
 
 	if(!load_translation_ast())
@@ -946,4 +1086,4 @@ int main(int argc, char** argv)
 
 	return 0;
 }
-// NOLINTEND(*-container-contains, *-unnecessary-value-param, *-for-range-copy)
+// NOLINTEND(*-unnecessary-value-param, *-for-range-copy)

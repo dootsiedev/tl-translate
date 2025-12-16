@@ -534,6 +534,11 @@ MY_NOINLINE bool debug_stacktrace(debug_stacktrace_observer& printer, int skip)
 #endif
 }
 
+#ifdef __linux__
+#ifdef __GNUG__
+#include <cxxabi.h>
+#endif
+#endif
 // if you wanted to print the name of a function
 bool debug_write_function_info(debug_stacktrace_observer& printer, void* address)
 {
@@ -546,6 +551,63 @@ bool debug_write_function_info(debug_stacktrace_observer& printer, void* address
 	case BT_TYPES::CPP_STACKTRACE: abort();
 	case BT_TYPES::ALL: print_once = false; [[fallthrough]];
 	case BT_TYPES::DEFAULT:
+#ifdef __linux__
+	{
+		// NOTE: untested
+		Dl_info dinfo;
+		if(dladdr(address, &dinfo) != 0)
+		{
+			const char* module_name = dinfo.dli_fname;
+			if(cv_bt_full_paths.data() == 0)
+			{
+				module_name = remove_file_path(dinfo.dli_fname);
+			}
+
+			// this only works because the functions are public
+			// this won't work if you use -fvisibility=hidden, or inline optimizations.
+			const char* function = dinfo.dli_sname;
+
+#ifdef __GNUG__
+			auto free_del = [](void* ptr) { free(ptr); };
+			std::unique_ptr<char, decltype(free_del)> demangler{NULL, free_del};
+			if(cv_bt_demangle.data() != 0 && function != NULL)
+			{
+				int status = 0;
+				demangler.reset(abi::__cxa_demangle(function, NULL, NULL, &status));
+				switch(status)
+				{
+				case 0: function = demangler.get(); break;
+				case -1:
+					printer.print_string(
+						"abi::__cxa_demangle(-1): A memory allocation failure occurred.\n");
+					break;
+				case -2:
+					// this is spammy.
+					// payload->printer->print_string(
+					//	"abi::__cxa_demangle(-2): mangled_name is not a valid name under the C++ ABI
+					// mangling rules.\n");
+					break;
+				case -3:
+					printer.print_string("abi::__cxa_demangle(-3_): One of the arguments is invalid.\n");
+					break;
+				default: printer.print_string_fmt("abi::__cxa_demangle(%d): unknown status.\n", status);
+				}
+			}
+#endif
+
+			uintptr_t address_copy;
+			memcpy(&address_copy, &address, sizeof(address_copy));
+			if(!print_once) printer.print_string("dladdr:\n");
+			debug_stacktrace_info info{0, address_copy, module_name, function, nullptr, 0};
+			printer.print_line(&info);
+			if(print_once)
+			{
+				return true;
+			}
+		}
+	}
+		[[fallthrough]];
+#endif
 	case BT_TYPES::LIBBACKTRACE_MINGW:
 	case BT_TYPES::LIBBACKTRACE:
 		if(cv_has_stacktrace_libbacktrace.data() != 0)

@@ -9,6 +9,15 @@
 
 typedef void (*event_listener_callback)(void* ud);
 
+// idea: I think I could probably use a static RTTI trick
+// so that each type has it's own index registered in the observer.
+// so I can avoid storing the callback pointer.
+// then I could use an index for locating the data.
+// Instead of a freelist + pointer to the list,
+// I could use the callback to also handle removing the node from the list,
+// and if I use pop-and-swap, I can fix the index location.
+// and to make things a bit easier, I should have a virtual observer for the trigger() callback.
+// and I think I should use virtual functions, for that RTTI typeid name.
 struct INTERNAL_event_listener_node
 {
 	INTERNAL_event_listener_node** head = nullptr;

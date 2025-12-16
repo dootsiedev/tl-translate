@@ -604,6 +604,8 @@ add_executable(${PROJECT_NAME}
 )
 
 # put the parser into it's own file so I can remove the debug info from it.
+# the only problem is that technically I use the same binary for translate & merge-strings
+# and it doesn't share the same serr, which is fine (it shouldn't use it, but it has headers...
 add_library(TL_PARSER OBJECT EXCLUDE_FROM_ALL
         code/translation_parser.h
         code/translation_parser.cpp)
@@ -1008,7 +1010,15 @@ if(BUILD_TESTS)
     # I want to fetchContent this just for fun, but I don't know if fetchcontent will let me set the build flags.
     add_subdirectory(tools/merge-strings)
 
-    target_link_libraries(merge-strings TL_PARSER)
-    target_link_libraries(merge-strings ALL_SANITIZERS MY_OPTIONS_FLAGS)
+    #TODO: use curl to call the openrouter embedding API
+    #find_package(CURL REQUIRED)
+    #target_link_libraries(merge-strings PRIVATE CURL::libcurl)
+
+    # used for TCP between python.
+    find_package(libuv CONFIG REQUIRED)
+    target_link_libraries(merge-strings PRIVATE $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>)
+
+    target_link_libraries(merge-strings PRIVATE TL_PARSER)
+    target_link_libraries(merge-strings PRIVATE ALL_SANITIZERS MY_OPTIONS_FLAGS)
     target_compile_options(merge-strings PRIVATE ${MY_COMPILER_FLAGS})
 endif()

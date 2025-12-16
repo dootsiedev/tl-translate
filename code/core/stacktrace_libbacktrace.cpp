@@ -299,7 +299,7 @@ struct bt_payload
 				// mangling rules.\n");
 				break;
 			case -3:
-				printer.print_string("abi::__cxa_demangle(-3_: One of the arguments is invalid.\n");
+				printer.print_string("abi::__cxa_demangle(-3_): One of the arguments is invalid.\n");
 				break;
 			default: printer.print_string_fmt("abi::__cxa_demangle(%d): unknown status.\n", status);
 			}
@@ -432,6 +432,7 @@ __attribute__((noinline)) bool
 	// apparently this function breaks easily with anything nonstandard.
 	// TODO: I think <stacktrace> won't retrieve function name, until you call name()
 	//  if that is true, I can just use the address part.
+	// TODO: cv_bt_max_depth wont work with -1
 	int result = RtlCaptureStackBackTrace(
 		cv_bt_ignore_skip.data() == 0 ? (skip + 1) : 0,
 		cv_bt_max_depth.data() + 1,
